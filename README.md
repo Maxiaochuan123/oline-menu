@@ -1,36 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 在线菜单点餐系统
 
-## Getting Started
+这是一个基于 Next.js 15 和 Supabase 构建的轻量级在线菜单及点餐系统。
 
-First, run the development server:
+## 功能特性
+
+- **商家端**：菜单管理、订单实时接收（语音提示）、支付确认、客户信息管理与积分排行。
+- **客户端**：微信引导、新品轮播弹窗、购物车、在线下单、订单状态实时同步、违约金自动逻辑。
+
+## 快速开始
+
+### 1. 数据库配置
+
+请登录 [Supabase 控制台](https://supabase.com)，打开 **SQL Editor**，复制并运行项目目录下的 `supabase/schema.sql` 脚本。这将一次性创建所有必要的表、索引、权限策略和实时更新配置。
+
+### 2. 存储配置
+
+在 Supabase 的 **Storage** 栏目中：
+
+1. 创建一个新的 Bucket，命名为 `menu-images`。
+2. 将其设置为 **Public**（公开），以便客户可以查看菜品图片。
+
+### 3. 环境变数
+
+项目根目录下已生成 `.env.local` 文件，内含您的 Supabase URL 和 Key。
+
+### 4. 安装与运行
 
 ```bash
+# 安装依赖
+npm install
+
+# 启动开发服务器
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开浏览器访问 `http://localhost:3000` 即可开始使用。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 支付方案
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+当前采用 **“展示个人收款码 + 商家手动确认”** 的 MVP 方案。商家可以在“店铺设置”中上传微信或支付宝收款码图片。
 
-## Learn More
+## 部署
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+推荐部署至 [Vercel](https://vercel.com)。关联您的 GitHub 仓库后，Vercel 会自动识别 Next.js 项目并一键完成上线。

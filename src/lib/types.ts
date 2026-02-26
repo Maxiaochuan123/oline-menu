@@ -1,0 +1,103 @@
+export interface Merchant {
+  id: string
+  email: string
+  shop_name: string
+  is_accepting_orders: boolean
+  announcement: string | null
+  payment_qr_url: string | null
+  payment_qr_urls: { wechat?: string; alipay?: string } | null
+  created_at: string
+}
+
+export interface Category {
+  id: string
+  merchant_id: string
+  name: string
+  sort_order: number
+  created_at: string
+}
+
+export interface MenuItem {
+  id: string
+  merchant_id: string
+  category_id: string
+  name: string
+  description: string | null
+  price: number
+  unit: string
+  image_url: string | null
+  is_new: boolean
+  is_available: boolean
+  new_until: string | null
+  created_at: string
+}
+
+export interface Customer {
+  id: string
+  merchant_id: string
+  phone: string
+  name: string
+  address: string | null
+  order_count: number
+  total_spent: number
+  points: number
+  created_at: string
+}
+
+export type OrderType = 'personal' | 'company'
+export type OrderStatus = 'pending' | 'preparing' | 'delivering' | 'completed' | 'cancelled'
+export type CancelledBy = 'merchant' | 'customer'
+
+export interface Order {
+  id: string
+  merchant_id: string
+  customer_id: string | null
+  order_type: OrderType
+  phone: string
+  customer_name: string
+  address: string
+  scheduled_time: string
+  status: OrderStatus
+  cancelled_by: CancelledBy | null
+  cancelled_at: string | null
+  penalty_rate: number | null
+  penalty_amount: number | null
+  total_amount: number
+  refund_amount: number | null
+  created_at: string
+}
+
+export interface OrderItem {
+  id: string
+  order_id: string
+  menu_item_id: string
+  item_name: string
+  item_price: number
+  quantity: number
+  remark: string | null
+}
+
+export interface CartItem {
+  menuItem: MenuItem
+  quantity: number
+  remark: string
+}
+
+export interface DisabledDate {
+  id: string
+  merchant_id: string
+  disabled_date: string
+  reason: string | null
+}
+
+export interface Message {
+  id: string
+  order_id: string
+  merchant_id: string
+  sender: 'customer' | 'merchant'
+  content: string
+  rating: number | null   // 1-5 星，仅客户发送时可有
+  is_read_by_merchant: boolean
+  is_read_by_customer: boolean
+  created_at: string
+}
