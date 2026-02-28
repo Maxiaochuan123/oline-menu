@@ -9,11 +9,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
-  pending:    { label: '待收单', color: '#f97316', bg: '#fff7ed' },
+  pending:    { label: '待收单', color: '#f59e0b', bg: '#fef3c7' },
   preparing:  { label: '制作中', color: '#3b82f6', bg: '#eff6ff' },
-  delivering: { label: '配送中', color: '#22c55e', bg: '#f0fdf4' },
-  completed:  { label: '已完成', color: '#6b7280', bg: '#f9fafb' },
-  cancelled:  { label: '已取消', color: '#ef4444', bg: '#fef2f2' },
+  delivering: { label: '配送中', color: '#8b5cf6', bg: '#f3e8ff' },
+  completed:  { label: '已完成', color: '#10b981', bg: '#d1fae5' },
+  cancelled:  { label: '已取消', color: '#6b7280', bg: '#f3f4f6' },
 }
 
 export default function MyOrdersPage({ params }: { params: Promise<{ merchantId: string }> }) {
@@ -159,7 +159,7 @@ function OrderCard({ order, merchantId }: { order: Order; merchantId: string }) 
             }}>
               {st.label}
             </div>
-            <div style={{ fontSize: '15px', fontWeight: '800', color: '#f97316' }}>
+            <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827' }}>
               {formatPrice(Number(order.total_amount))}
             </div>
           </div>

@@ -98,3 +98,38 @@ END $$;
 
 -- 修正：让 customers.name 字段可空，以支持仅手机号完成登录
 ALTER TABLE customers ALTER COLUMN name DROP NOT NULL;
+
+-- ============================================
+-- P8: 取消订单动态违约金与售后退款机制
+-- ============================================
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS after_sales_status TEXT DEFAULT 'none' CHECK (after_sales_status IN ('none', 'pending', 'resolved', 'rejected'));
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS after_sales_reason TEXT;
+
+-- ============================================
+-- P10: 售后防怠慢催单补丁
+-- ============================================
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS after_sales_urge_count INTEGER DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS after_sales_last_urge_at TIMESTAMP WITH TIME ZONE;
+
+-- ============================================
+-- P11: 售后原因与流转全链路细化
+-- ============================================
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS after_sales_items JSONB;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS after_sales_images JSONB;
+
+-- 创建用于存放售后凭证图片的 Storage Bucket (如有需要)
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('after_sales_images', 'after_sales_images', true) 
+ON CONFLICT (id) DO NOTHING;
+
+-- ============================================
+-- P11-D/P12: 售后双向沟通体系与整合 (已使用 messages 表承载)
+-- ============================================
+-- (The `after_sales_messages` table was deprecated during P12 and removed.)
+-- 实时订阅设置
+-- BEGIN;
+--   DROP PUBLICATION IF EXISTS supabase_realtime;
+--   CREATE PUBLICATION supabase_realtime;
+-- COMMIT;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE orders, messages;

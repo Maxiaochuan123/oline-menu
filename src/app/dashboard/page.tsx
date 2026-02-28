@@ -9,9 +9,20 @@ import type { Merchant, Order } from '@/lib/types'
 import { formatPrice, speak, lastFourDigits } from '@/lib/utils'
 import {
   Menu, X, LogOut, UtensilsCrossed, ClipboardList, Users,
-  ChefHat, TrendingUp, Clock, Copy, Check, Settings, MessageSquare, Tag
+  ChefHat, TrendingUp, Clock, Copy, Check, Settings, MessageSquare, Tag,
+  AlertTriangle, CheckCircle, ChevronRight, Star
 } from 'lucide-react'
 import Link from 'next/link'
+import OrderManagerModal from '../../components/OrderManagerModal'
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: '待处理',
+  preparing: '制作中',
+  delivering: '配送中',
+  completed: '已完成',
+  cancelled: '已取消'
+}
+const STATUS_FLOW = ['pending', 'preparing', 'delivering', 'completed']
 
 export default function DashboardPage() {
   const supabase = createClient()
@@ -22,6 +33,9 @@ export default function DashboardPage() {
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
   const [unreadMsgCount, setUnreadMsgCount] = useState(0)
+
+  // 订单详情状态 (复用外部组件)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
 
   const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -82,9 +96,20 @@ export default function DashboardPage() {
         { event: 'UPDATE', schema: 'public', table: 'orders', filter: `merchant_id=eq.${merchant.id}` },
         (payload) => {
           const updated = payload.new as Order
+          const old = payload.old as Partial<Order>
           setTodayOrders(prev => prev.map(o => o.id === updated.id ? updated : o))
           if (updated.status === 'cancelled' && updated.cancelled_by === 'customer') {
-            speak(`${lastFourDigits(updated.phone)}取消订单啦！`)
+            setTimeout(() => speak(`${lastFourDigits(updated.phone)}取消订单啦！`), 100)
+          }
+          if (updated.after_sales_status === 'pending' && old.after_sales_status !== 'pending') {
+            setTimeout(() => speak(`尾号 ${lastFourDigits(updated.phone)} 的客户申请了售后 理由是 ${updated.after_sales_reason || '未知'} 请尽快处理！`), 200)
+          }
+          if (updated.after_sales_status === 'pending' && old.after_sales_status === 'pending') {
+            const oldUrge = old.after_sales_urge_count || 0
+            const newUrge = updated.after_sales_urge_count || 0
+            if (newUrge > oldUrge) {
+              setTimeout(() => speak(`尾号 ${lastFourDigits(updated.phone)} 的客户 第 ${newUrge} 次催促您处理售后，请尽快处理！`), 200)
+            }
           }
         }
       )
@@ -145,6 +170,8 @@ export default function DashboardPage() {
     router.push('/login')
   }
 
+  // ============== 订单处理组件化完毕 ==============
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
@@ -155,7 +182,7 @@ export default function DashboardPage() {
 
   const completedOrders = todayOrders.filter(o => o.status === 'completed')
   const todayRevenue = completedOrders.reduce((sum, o) => sum + Number(o.total_amount), 0)
-  const pendingCount = todayOrders.filter(o => o.status === 'pending').length
+  const pendingCount = todayOrders.filter(o => o.status === 'pending' || o.after_sales_status === 'pending').length
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
@@ -170,17 +197,25 @@ export default function DashboardPage() {
         position: 'sticky', top: 0, zIndex: 10,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <ChefHat size={24} color="#f97316" />
-          <span style={{ fontWeight: '700', fontSize: '17px' }}>
-            {merchant?.shop_name}
-          </span>
+          <ChefHat size={24} color="#f59e0b" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontWeight: '800', fontSize: '18px', color: '#1c1917' }}>
+              {merchant?.shop_name}
+            </span>
+            {merchant?.rating && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>
+                <Star fill="#f59e0b" color="#f59e0b" size={12} />
+                <span style={{ fontSize: '12px', color: '#d97706', fontWeight: '800' }}>{merchant.rating.toFixed(1)}</span>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
             onClick={copyShareLink}
             className="btn btn-sm"
             style={{
-              background: copied ? '#22c55e' : '#f97316',
+              background: copied ? '#22c55e' : '#f59e0b',
               color: 'white', border: 'none',
             }}
           >
@@ -193,7 +228,7 @@ export default function DashboardPage() {
       {/* 数据概览 */}
       <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
         <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '24px', fontWeight: '700', color: '#f97316' }}>
+          <div style={{ fontSize: '24px', fontWeight: '700', color: '#f59e0b' }}>
             {todayOrders.length}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>今日订单</div>
@@ -217,7 +252,7 @@ export default function DashboardPage() {
         <Link href="/menu" style={{ textDecoration: 'none' }}>
           <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
             <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <UtensilsCrossed size={22} color="#f97316" />
+              <UtensilsCrossed size={22} color="#f59e0b" />
             </div>
             <div>
               <div style={{ fontWeight: '600', fontSize: '15px' }}>菜单管理</div>
@@ -261,7 +296,7 @@ export default function DashboardPage() {
         <Link href="/coupons" style={{ textDecoration: 'none' }}>
           <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
             <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Tag size={22} color="#f97316" />
+              <Tag size={22} color="#f59e0b" />
             </div>
             <div>
               <div style={{ fontWeight: '600', fontSize: '15px' }}>优惠券</div>
@@ -302,8 +337,12 @@ export default function DashboardPage() {
             <p style={{ fontSize: '13px', marginTop: '4px' }}>分享链接给客户开始接单吧！</p>
           </div>
         ) : (
-          todayOrders.slice(0, 5).map(order => (
-            <Link key={order.id} href={`/orders`} style={{ textDecoration: 'none', color: 'inherit' }}>
+          [...todayOrders].sort((a, b) => {
+            if (a.after_sales_status === 'pending' && b.after_sales_status !== 'pending') return -1;
+            if (a.after_sales_status !== 'pending' && b.after_sales_status === 'pending') return 1;
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          }).slice(0, 5).map(order => (
+            <div key={order.id} onClick={() => setSelectedOrder(order)} style={{ cursor: 'pointer' }}>
               <div className="card animate-fade-in" style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -319,13 +358,22 @@ export default function DashboardPage() {
                     {formatPrice(Number(order.total_amount))}
                   </div>
                 </div>
-                <span className={`tag tag-status tag-${order.status}`}>
-                  {
-                    { pending: '待处理', preparing: '制作中', delivering: '配送中', completed: '已完成', cancelled: '已取消' }[order.status]
-                  }
-                </span>
+                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className={`tag tag-status tag-${order.status}`}>
+                      {
+                        { pending: '待处理', preparing: '制作中', delivering: '配送中', completed: '已完成', cancelled: '已取消' }[order.status]
+                      }
+                    </span>
+                    {order.after_sales_status === 'pending' && (
+                      <span className="tag urgent-tag-pulse">
+                        ! 请求售后 {order.after_sales_urge_count > 0 && `(客户已催处理 ${order.after_sales_urge_count} 次)`}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
-            </Link>
+            </div>
           ))
         )}
       </div>
@@ -377,6 +425,15 @@ export default function DashboardPage() {
           </div>
         </>
       )}
+
+      <OrderManagerModal 
+        order={selectedOrder} 
+        onClose={() => setSelectedOrder(null)} 
+        onSuccess={() => {
+          setSelectedOrder(null)
+          loadData()
+        }}
+      />
     </div>
   )
 }

@@ -490,9 +490,22 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* 搜索栏 */}
       <header style={{ 
-        padding: '12px 16px', background: 'white', 
+        padding: '16px 16px 12px', background: 'white', 
         borderBottom: '1px solid var(--color-border)', flexShrink: 0 
       }}>
+        {/* 商家品牌与信用分展示 (P12-E) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div style={{ fontSize: '18px', fontWeight: '800', color: '#1c1917', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {merchant?.shop_name}
+            {merchant?.rating && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>
+                <Star fill="#f59e0b" color="#f59e0b" size={12} />
+                <span style={{ fontSize: '12px', color: '#d97706', fontWeight: '700' }}>{merchant.rating.toFixed(1)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
         <div style={{ position: 'relative', marginBottom: (centerCoupons.length > 0 || allMyCoupons.length > 0) ? '12px' : 0 }}>
           <Search size={16} color="#a8a29e" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
           <input 
@@ -504,28 +517,39 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           />
         </div>
 
-        {/* 领券中心常驻入口 */}
-        <div 
-          onClick={() => setShowCouponCenter(true)}
-          style={{ 
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
-            background: '#fff7ed', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer',
-            marginTop: '12px'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Gift size={16} color="#ea580c" />
-            <span style={{ fontSize: '13px', color: '#c2410c', fontWeight: '600' }}>
-              领券中心
-              {claimableCoupons.length > 0 ? (
-                <span style={{ marginLeft: '6px', background: '#ea580c', color: 'white', padding: '1px 6px', borderRadius: '10px', fontSize: '11px' }}>{claimableCoupons.length}张待领取</span>
-              ) : (
-                <span style={{ marginLeft: '6px', color: '#ea580c', opacity: 0.8, fontSize: '11px' }}>进入查看</span>
-              )}
-            </span>
+        {/* 首页快捷入口区 */}
+        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+          {/* 领券中心 */}
+          <div 
+            onClick={() => setShowCouponCenter(true)}
+            style={{ 
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+              background: '#fff7ed', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Gift size={20} color="#ea580c" />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '13px', color: '#c2410c', fontWeight: '600', display: 'flex', alignItems: 'center' }}>
+                  领券中心
+                  {claimableCoupons.length > 0 && <span style={{ marginLeft: '4px', background: '#ea580c', color: 'white', padding: '1px 4px', borderRadius: '8px', fontSize: '10px' }}>{claimableCoupons.length}待领</span>}
+                </span>
+                <span style={{ fontSize: '11px', color: '#ea580c', opacity: 0.8 }}>我的卡券 ({availableCoupons.length})</span>
+              </div>
+            </div>
+            <ChevronRight size={14} color="#ea580c" />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#ea580c', fontSize: '12px' }}>
-            我的卡券({allMyCoupons.length}) <ChevronRight size={14} />
+
+          {/* 历史订单 */}
+          <div 
+            onClick={() => router.push(`/m/${merchantId}/orders`)}
+            style={{ 
+              flexShrink: 0, width: '90px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', 
+              background: '#f8fafc', border: '1px solid #f1f5f9', padding: '8px 4px', borderRadius: '8px', cursor: 'pointer', gap: '4px', color: '#475569'
+            }}
+          >
+            <Briefcase size={18} />
+            <span style={{ fontSize: '12px', fontWeight: '600' }}>历史订单</span>
           </div>
         </div>
       </header>

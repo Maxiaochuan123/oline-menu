@@ -7,8 +7,9 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import type { Merchant, Order, OrderItem } from '@/lib/types'
 import { formatPrice, getCountdown, speak, lastFourDigits } from '@/lib/utils'
-import { ArrowLeft, Clock, ChevronRight, X, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Clock, ChevronRight, HelpCircle } from 'lucide-react'
 import Link from 'next/link'
+import OrderManagerModal from '@/components/OrderManagerModal'
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '待处理', preparing: '制作中', delivering: '配送中', completed: '已完成', cancelled: '已取消'
@@ -22,9 +23,6 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
-  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
-  const [showCancel, setShowCancel] = useState(false)
-  const [pendingStatusOrder, setPendingStatusOrder] = useState<Order | null>(null)
   const [, setTick] = useState(0)
 
   const loadData = useCallback(async () => {
@@ -59,10 +57,25 @@ export default function OrdersPage() {
             speak(`叮！接到来自${lastFourDigits(newOrder.phone)}的订单啦！`)
           } else if (payload.eventType === 'UPDATE') {
             const updated = payload.new as Order
-            setOrders(prev => prev.map(o => o.id === updated.id ? updated : o))
-            if (updated.status === 'cancelled' && updated.cancelled_by === 'customer') {
-              speak(`${lastFourDigits(updated.phone)}取消订单啦！`)
-            }
+            setOrders(prev => {
+              const oldOrder = prev.find(o => o.id === updated.id)
+              
+              if (oldOrder && oldOrder.status !== 'cancelled' && updated.status === 'cancelled' && updated.cancelled_by === 'customer') {
+                setTimeout(() => speak(`${lastFourDigits(updated.phone)}取消订单啦！`), 100)
+              }
+              
+              if (oldOrder && oldOrder.after_sales_status !== 'pending' && updated.after_sales_status === 'pending') {
+                setTimeout(() => speak(`尾号 ${lastFourDigits(updated.phone)} 的客户申请了售后 理由是 ${updated.after_sales_reason || '未知'} 请尽快处理！`), 200)
+              }
+
+              const oldUrge = oldOrder?.after_sales_urge_count || 0
+              const newUrge = updated.after_sales_urge_count || 0
+              if (newUrge > oldUrge) {
+                setTimeout(() => speak(`尾号 ${lastFourDigits(updated.phone)} 的客户 第 ${newUrge} 次催促您处理售后，请尽快处理！`), 200)
+              }
+              
+              return prev.map(o => o.id === updated.id ? updated : o)
+            })
           }
         }
       ).subscribe()
@@ -71,61 +84,32 @@ export default function OrdersPage() {
 
   async function openOrder(order: Order) {
     setSelectedOrder(order)
-    const { data } = await supabase.from('order_items').select('*').eq('order_id', order.id)
-    setOrderItems(data || [])
-  }
-
-  async function updateStatus(order: Order) {
-    const idx = STATUS_FLOW.indexOf(order.status)
-    if (idx < 0 || idx >= STATUS_FLOW.length - 1) return
-    const nextStatus = STATUS_FLOW[idx + 1]
-
-    await supabase.from('orders').update({ status: nextStatus }).eq('id', order.id)
-
-    // 如果完成，更新客户统计
-    if (nextStatus === 'completed' && order.customer_id) {
-      const { data: customer } = await supabase.from('customers').select('*').eq('id', order.customer_id).single()
-      if (customer) {
-        await supabase.from('customers').update({
-          order_count: customer.order_count + 1,
-          total_spent: Number(customer.total_spent) + Number(order.total_amount),
-          points: customer.points + Math.floor(Number(order.total_amount)),
-        }).eq('id', customer.id)
-      }
-    }
-
-    loadData()
-    if (selectedOrder?.id === order.id) {
-      setSelectedOrder({ ...order, status: nextStatus as Order['status'] })
-    }
-    setPendingStatusOrder(null)
   }
 
   function requestStatusUpdate(order: Order) {
-    const idx = STATUS_FLOW.indexOf(order.status)
-    if (idx < 0 || idx >= STATUS_FLOW.length - 1) return
-    setPendingStatusOrder(order)
+    if (order.after_sales_status === 'pending') {
+      alert('该订单尚有纠纷未处理完结，请先点击详情查阅并完结售后，再推进订单流程。')
+      return
+    }
+    // 状态推进逻辑不再直接在此处理，交由组件或保留底层刷新
   }
 
-  async function cancelOrder() {
-    if (!selectedOrder) return
-    await supabase.from('orders').update({
-      status: 'cancelled',
-      cancelled_by: 'merchant',
-      cancelled_at: new Date().toISOString(),
-      refund_amount: selectedOrder.total_amount,
-    }).eq('id', selectedOrder.id)
-    setShowCancel(false)
-    setSelectedOrder(null)
-    loadData()
-  }
+  const loadOrders = () => loadData()
+
+  // 售后相关逻辑已整体移至 OrderManagerModal
 
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}><span className="spinner" /></div>
   }
 
-  const activeOrders = orders.filter(o => !['completed', 'cancelled'].includes(o.status))
-  const historyOrders = orders.filter(o => ['completed', 'cancelled'].includes(o.status))
+  const activeOrders = orders
+    .filter(o => !['completed', 'cancelled'].includes(o.status) || o.after_sales_status === 'pending')
+    .sort((a, b) => {
+      if (a.after_sales_status === 'pending' && b.after_sales_status !== 'pending') return -1;
+      if (a.after_sales_status !== 'pending' && b.after_sales_status === 'pending') return 1;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    })
+  const historyOrders = orders.filter(o => ['completed', 'cancelled'].includes(o.status) && o.after_sales_status !== 'pending')
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
@@ -158,9 +142,27 @@ export default function OrdersPage() {
                       {order.phone} · {formatPrice(Number(order.total_amount))}
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
-                    <div style={{ fontSize: '12px', color: '#f97316', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
+                  <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
+                      {order.after_sales_status === 'pending' && (
+                        <span className="tag urgent-tag-pulse">
+                          ! 请求售后 {order.after_sales_urge_count > 0 && `(客户已催处理 ${order.after_sales_urge_count} 次)`}
+                        </span>
+                      )}
+                    </div>
+                    {order.after_sales_status === 'resolved' && (
+                       <div style={{ color: '#15803d', fontSize: '11px', fontWeight: '700', background: '#f0fdf4', padding: '4px 8px', borderRadius: '4px', display: 'inline-block', border: '1px solid #bbf7d0' }}>
+                         已售后: 退 {formatPrice(Number(order.refund_amount))}
+                       </div>
+                    )}
+                    {order.after_sales_status === 'rejected' && (
+                       <div style={{ color: '#666', fontSize: '11px', fontWeight: '700', background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', display: 'inline-block', border: '1px solid #e5e7eb' }}>
+                         已售后: 驳回
+                       </div>
+                    )}
+
+                    <div style={{ fontSize: '12px', color: '#f97316', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
                       <Clock size={12} /> {getCountdown(order.scheduled_time)}
                     </div>
                   </div>
@@ -172,7 +174,7 @@ export default function OrdersPage() {
                   ))}
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
-                  {order.status !== 'completed' && order.status !== 'cancelled' && (
+                  {order.status !== 'completed' && order.status !== 'cancelled' && order.after_sales_status !== 'pending' && (
                     <button
                       onClick={(e) => { e.stopPropagation(); requestStatusUpdate(order) }}
                       className="btn btn-primary btn-sm"
@@ -198,7 +200,20 @@ export default function OrdersPage() {
                     <span style={{ fontWeight: '600' }}>{order.customer_name}</span>
                     <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginLeft: '8px' }}>{formatPrice(Number(order.total_amount))}</span>
                   </div>
-                  <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
+                  <div style={{ textAlign: 'right' }}>
+                    <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
+                    
+                    {order.after_sales_status === 'resolved' && (
+                       <div style={{ marginTop: '6px', color: '#15803d', fontSize: '11px', fontWeight: '700', background: '#f0fdf4', padding: '4px 8px', borderRadius: '4px', display: 'inline-block', border: '1px solid #bbf7d0' }}>
+                         已售后: 退 {formatPrice(Number(order.refund_amount))}
+                       </div>
+                    )}
+                    {order.after_sales_status === 'rejected' && (
+                       <div style={{ marginTop: '6px', color: '#666', fontSize: '11px', fontWeight: '700', background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', display: 'inline-block', border: '1px solid #e5e7eb' }}>
+                         已售后: 驳回
+                       </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -213,116 +228,14 @@ export default function OrdersPage() {
         )}
       </div>
 
-      {/* 订单详情弹窗 */}
-      {selectedOrder && (
-        <>
-          <div className="overlay" onClick={() => setSelectedOrder(null)} />
-          <div className="dialog">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontWeight: '700' }}>订单详情</h3>
-              <button onClick={() => setSelectedOrder(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
-            </div>
-            <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
-              <span className={`tag tag-${selectedOrder.order_type === 'personal' ? 'personal' : 'company'}`}>
-                {selectedOrder.order_type === 'personal' ? '个人' : '公司'}
-              </span>
-              <span className={`tag tag-status tag-${selectedOrder.status}`}>{STATUS_LABELS[selectedOrder.status]}</span>
-            </div>
-            <div style={{ fontSize: '14px', lineHeight: '2' }}>
-              <div><strong>客户：</strong>{selectedOrder.customer_name}</div>
-              <div><strong>电话：</strong>{selectedOrder.phone}</div>
-              <div><strong>地址：</strong>{selectedOrder.address}</div>
-              <div><strong>预定时间：</strong>{new Date(selectedOrder.scheduled_time).toLocaleString('zh-CN')}</div>
-            </div>
-            <div style={{ margin: '12px 0', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
-              <strong style={{ fontSize: '14px' }}>菜品明细：</strong>
-              {orderItems.map(item => (
-                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', padding: '4px 0' }}>
-                  <span>{item.item_name} x{item.quantity} {item.remark ? `(${item.remark})` : ''}</span>
-                  <span>{formatPrice(item.item_price * item.quantity)}</span>
-                </div>
-              ))}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', fontSize: '16px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--color-border)' }}>
-                <span>合计</span>
-                <span style={{ color: '#f97316' }}>{formatPrice(Number(selectedOrder.total_amount))}</span>
-              </div>
-            </div>
-            {!['completed', 'cancelled'].includes(selectedOrder.status) && (
-              <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-                <button onClick={() => setShowCancel(true)} className="btn btn-danger btn-sm" style={{ flex: 1 }}>取消订单</button>
-                <button onClick={() => requestStatusUpdate(selectedOrder)} className="btn btn-primary" style={{ flex: 2 }}>
-                  {STATUS_LABELS[STATUS_FLOW[STATUS_FLOW.indexOf(selectedOrder.status) + 1]] || ''}
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* 取消确认弹窗 */}
-      {showCancel && (
-        <>
-          <div className="overlay" style={{ zIndex: 60 }} onClick={() => setShowCancel(false)} />
-          <div className="dialog" style={{ zIndex: 70 }}>
-            <div style={{ textAlign: 'center' }}>
-              <AlertTriangle size={48} color="#ef4444" style={{ margin: '0 auto 12px' }} />
-              <h3 style={{ fontWeight: '700', marginBottom: '8px' }}>确认取消订单？</h3>
-              <p style={{ fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-                商家取消订单将全额退款给客户，此操作不可撤销。
-              </p>
-              <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
-                <button onClick={() => setShowCancel(false)} className="btn btn-outline" style={{ flex: 1 }}>再想想</button>
-                <button onClick={cancelOrder} className="btn btn-danger" style={{ flex: 1 }}>确认取消</button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-      {/* 推进状态二次确认弹窗 */}
-      {pendingStatusOrder && (() => {
-        const idx = STATUS_FLOW.indexOf(pendingStatusOrder.status)
-        const nextStatus = STATUS_FLOW[idx + 1]
-        return (
-          <>
-            <div className="overlay" style={{ zIndex: 80 }} onClick={() => setPendingStatusOrder(null)} />
-            <div className="dialog" style={{ zIndex: 90 }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{
-                  width: '56px', height: '56px', borderRadius: '50%',
-                  background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  margin: '0 auto 14px'
-                }}>
-                  <AlertTriangle size={28} color="#f97316" />
-                </div>
-                <h3 style={{ fontWeight: '800', marginBottom: '10px' }}>确认更新状态？</h3>
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  gap: '10px', margin: '14px 0', fontSize: '15px'
-                }}>
-                  <span style={{
-                    padding: '4px 12px', borderRadius: '20px',
-                    background: '#f5f5f4', fontWeight: '600', color: '#78716c'
-                  }}>{STATUS_LABELS[pendingStatusOrder.status]}</span>
-                  <ChevronRight size={18} color="#f97316" />
-                  <span style={{
-                    padding: '4px 12px', borderRadius: '20px',
-                    background: '#fff7ed', fontWeight: '700', color: '#ea580c',
-                    border: '1px solid #fed7aa'
-                  }}>{STATUS_LABELS[nextStatus]}</span>
-                </div>
-                <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginBottom: '20px' }}>
-                  {pendingStatusOrder.customer_name} · {formatPrice(Number(pendingStatusOrder.total_amount))}
-                </p>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button onClick={() => setPendingStatusOrder(null)} className="btn btn-outline" style={{ flex: 1 }}>再想想</button>
-                  <button onClick={() => updateStatus(pendingStatusOrder)} className="btn btn-primary" style={{ flex: 1 }}>确认</button>
-                </div>
-              </div>
-            </div>
-          </>
-        )
-      })()}
+      <OrderManagerModal 
+        order={selectedOrder} 
+        onClose={() => setSelectedOrder(null)} 
+        onSuccess={() => {
+          setSelectedOrder(null)
+          loadOrders()
+        }}
+      />
     </div>
   )
 }

@@ -208,10 +208,14 @@ CREATE TABLE messages (
   sender TEXT NOT NULL CHECK (sender IN ('customer', 'merchant')),
   content TEXT NOT NULL,
   rating INT CHECK (rating BETWEEN 1 AND 5),
+  msg_type TEXT DEFAULT 'normal' CHECK (msg_type IN ('normal', 'after_sales', 'after_sales_closed')),
   is_read_by_merchant BOOLEAN DEFAULT false,
   is_read_by_customer BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- 若后续需兼容热更新请在 supabase sql 执行： 
+-- ALTER TABLE messages ADD COLUMN IF NOT EXISTS msg_type TEXT DEFAULT 'normal' CHECK (msg_type IN ('normal', 'after_sales', 'after_sales_closed'));
 
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "messages_public_read"   ON messages FOR SELECT USING (true);
@@ -220,4 +224,28 @@ CREATE POLICY "messages_public_update" ON messages FOR UPDATE USING (true);
 
 -- 开启 Realtime
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+
+-- ============================================
+-- 触发器：计算并更新商户的总评分 (P12-E)
+-- ============================================
+CREATE OR REPLACE FUNCTION update_merchant_rating()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.rating IS NOT NULL THEN
+    UPDATE merchants
+    SET rating = (
+      SELECT ROUND(AVG(rating)::numeric, 1)
+      FROM messages
+      WHERE merchant_id = NEW.merchant_id AND rating IS NOT NULL
+    )
+    WHERE id = NEW.merchant_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER on_message_rating_insert
+AFTER INSERT OR UPDATE OF rating ON messages
+FOR EACH ROW
+EXECUTE FUNCTION update_merchant_rating();
 

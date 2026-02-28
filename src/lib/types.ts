@@ -6,6 +6,7 @@ export interface Merchant {
   announcement: string | null
   payment_qr_url: string | null
   payment_qr_urls: { wechat?: string; alipay?: string } | null
+  rating?: number | null
   created_at: string
 }
 
@@ -14,6 +15,7 @@ export interface Category {
   merchant_id: string
   name: string
   sort_order: number
+  rating?: number | null
   created_at: string
 }
 
@@ -29,6 +31,7 @@ export interface MenuItem {
   is_new: boolean
   is_available: boolean
   new_until: string | null
+  rating?: number | null
   created_at: string
 }
 
@@ -41,6 +44,7 @@ export interface Customer {
   order_count: number
   total_spent: number
   points: number
+  rating?: number | null
   created_at: string
 }
 
@@ -60,10 +64,12 @@ export interface Order {
   status: OrderStatus
   cancelled_by: CancelledBy | null
   cancelled_at: string | null
+  confirmed_at: string | null // 商家接单时间
   penalty_rate: number | null
   penalty_amount: number | null
   total_amount: number
   refund_amount: number | null
+  rating?: number | null
   created_at: string
   // 折扣相关字段
   original_amount: number
@@ -71,6 +77,13 @@ export interface Order {
   vip_discount_amount: number
   coupon_discount_amount: number
   coupon_id: string | null
+  // 售后相关
+  after_sales_status: 'none' | 'pending' | 'resolved' | 'rejected'
+  after_sales_reason: string | null
+  after_sales_urge_count: number
+  after_sales_last_urge_at: string | null
+  after_sales_items?: string[] | null
+  after_sales_images?: string[] | null
 }
 
 export interface OrderItem {
@@ -103,12 +116,14 @@ export interface Message {
   sender: 'customer' | 'merchant'
   content: string
   rating: number | null   // 1-5 星，仅客户发送时可有
+  msg_type: 'normal' | 'after_sales' | 'after_sales_closed'
   is_read_by_merchant: boolean
   is_read_by_customer: boolean
+  rating?: number | null
   created_at: string
 }
 
-// ---- 优惠券 ----
+// ---- 优惠�?----
 export type CouponTargetType = 'all' | 'category' | 'customer'
 
 export interface Coupon {
@@ -124,9 +139,10 @@ export interface Coupon {
   target_category_id: string | null // 指定分类ID（target_type=category 时）
   target_customer_ids: string[]     // 指定用户ID列表（target_type=customer 时）
   target_item_ids: string[]         // 指定菜品ID列表
-  stackable: boolean                // 可叠加使用
+  stackable: boolean                // 可叠加使�?
   total_quantity: number | null      // 发放总量（null=不限量）
-  claimed_count: number              // 已领取数量
+  claimed_count: number              // 已领取数�?
+  rating?: number | null
   created_at: string
 }
 
@@ -137,6 +153,7 @@ export interface UserCoupon {
   status: 'unused' | 'used' | 'expired'
   used_at: string | null
   expires_at: string
+  rating?: number | null
   created_at: string
   coupon?: Coupon  // 关联数据
 }
