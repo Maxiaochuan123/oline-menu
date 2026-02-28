@@ -65,6 +65,12 @@ export interface Order {
   total_amount: number
   refund_amount: number | null
   created_at: string
+  // 折扣相关字段
+  original_amount: number
+  vip_discount_rate: number
+  vip_discount_amount: number
+  coupon_discount_amount: number
+  coupon_id: string | null
 }
 
 export interface OrderItem {
@@ -100,4 +106,37 @@ export interface Message {
   is_read_by_merchant: boolean
   is_read_by_customer: boolean
   created_at: string
+}
+
+// ---- 优惠券 ----
+export type CouponTargetType = 'all' | 'category' | 'customer'
+
+export interface Coupon {
+  id: string
+  merchant_id: string
+  title: string
+  amount: number
+  min_spend: number
+  is_global: boolean
+  expiry_days: number
+  status: 'active' | 'disabled'
+  target_type: CouponTargetType   // 定向类型：all=全场, category=指定分类, customer=指定用户
+  target_category_id: string | null // 指定分类ID（target_type=category 时）
+  target_customer_ids: string[]     // 指定用户ID列表（target_type=customer 时）
+  target_item_ids: string[]         // 指定菜品ID列表
+  stackable: boolean                // 可叠加使用
+  total_quantity: number | null      // 发放总量（null=不限量）
+  claimed_count: number              // 已领取数量
+  created_at: string
+}
+
+export interface UserCoupon {
+  id: string
+  customer_id: string
+  coupon_id: string
+  status: 'unused' | 'used' | 'expired'
+  used_at: string | null
+  expires_at: string
+  created_at: string
+  coupon?: Coupon  // 关联数据
 }

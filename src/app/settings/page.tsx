@@ -42,6 +42,9 @@ export default function SettingsPage() {
 
     const { data: dates } = await supabase.from('disabled_dates').select('*').eq('merchant_id', m.id).order('disabled_date')
     setDisabledDates(dates || [])
+
+
+
     setLoading(false)
   }, [supabase, router])
 
@@ -104,6 +107,8 @@ export default function SettingsPage() {
     await supabase.from('disabled_dates').delete().eq('id', id)
     loadData()
   }
+
+
 
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}><span className="spinner" /></div>
@@ -215,7 +220,15 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 禁用日期 */}
+        {/* 优惠券管理 - 已迁移到独立页面 */}
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <Link href="/coupons" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', textDecoration: 'none', color: 'inherit' }}>
+            <h3 style={{ fontWeight: '700', fontSize: '15px' }}>优惠券管理</h3>
+            <span style={{ color: '#f97316', fontSize: '13px' }}>前往管理 →</span>
+          </Link>
+        </div>
+
+        {/* 不接单日期 */}
         <div className="card" style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h3 style={{ fontWeight: '700', fontSize: '15px' }}>不接单日期</h3>
@@ -264,6 +277,7 @@ export default function SettingsPage() {
           </div>
         </>
       )}
+
     </div>
   )
 }

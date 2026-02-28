@@ -9,7 +9,7 @@ import type { Merchant, Order } from '@/lib/types'
 import { formatPrice, speak, lastFourDigits } from '@/lib/utils'
 import {
   Menu, X, LogOut, UtensilsCrossed, ClipboardList, Users,
-  ChefHat, TrendingUp, Clock, Copy, Check, Settings, MessageSquare
+  ChefHat, TrendingUp, Clock, Copy, Check, Settings, MessageSquare, Tag
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -258,6 +258,17 @@ export default function DashboardPage() {
             </div>
           </div>
         </Link>
+        <Link href="/coupons" style={{ textDecoration: 'none' }}>
+          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Tag size={22} color="#f97316" />
+            </div>
+            <div>
+              <div style={{ fontWeight: '600', fontSize: '15px' }}>优惠券</div>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>创建和管理优惠券</div>
+            </div>
+          </div>
+        </Link>
         <Link href="/messages" style={{ textDecoration: 'none' }}>
           <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', position: 'relative' }}>
             <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -341,6 +352,7 @@ export default function DashboardPage() {
                 { href: '/menu', icon: <UtensilsCrossed size={20} />, label: '菜单管理' },
                 { href: '/orders', icon: <ClipboardList size={20} />, label: '订单管理' },
                 { href: '/customers', icon: <Users size={20} />, label: '客户管理' },
+                { href: '/coupons', icon: <Tag size={20} />, label: '优惠券' },
                 { href: '/settings', icon: <Settings size={20} />, label: '店铺设置' },
               ].map(item => (
                 <Link key={item.href} href={item.href} style={{ textDecoration: 'none', color: 'inherit' }}>

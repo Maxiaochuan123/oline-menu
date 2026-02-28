@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect, use } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Order, Merchant, OrderItem, Message } from '@/lib/types'
 import { formatPrice, getCountdown } from '@/lib/utils'
 import { calculatePenalty } from '@/lib/penalty'
 import { 
   CheckCircle2, Clock, MapPin,
-  ArrowLeft, AlertCircle, QrCode, X, Star, Send, MessageSquare
+  ArrowLeft, AlertCircle, QrCode, X, Star, Send, MessageSquare, RefreshCw
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -21,6 +22,7 @@ const STATUS_MAP: Record<string, { label: string, color: string, step: number }>
 
 export default function OrderStatusPage({ params }: { params: Promise<{ merchantId: string, orderId: string }> }) {
   const supabase = createClient()
+  const router = useRouter()
   const { merchantId, orderId } = use(params)
 
   const [order, setOrder] = useState<Order | null>(null)
@@ -252,8 +254,25 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
         </div>
       </div>
 
-      <div style={{ position: 'fixed', bottom: '20px', left: '20px', right: '20px' }}>
-        <Link href={`/m/${merchantId}`}>
+      <div style={{ position: 'fixed', bottom: '20px', left: '20px', right: '20px', display: 'flex', gap: '10px' }}>
+        {order.status === 'cancelled' && (
+          <button
+            className="btn btn-primary"
+            style={{ flex: 1, height: '44px', borderRadius: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+            onClick={() => {
+              // 将原订单菜品写入 localStorage 购物车
+              const cartItems = items.map(item => ({
+                menuItem: { id: item.menu_item_id || item.id, name: item.item_name, price: item.item_price, image_url: '', category_id: '', merchant_id: merchantId, is_available: true, sort_order: 0 },
+                quantity: item.quantity
+              }))
+              localStorage.setItem(`cart_${merchantId}`, JSON.stringify(cartItems))
+              router.push(`/m/${merchantId}`)
+            }}
+          >
+            <RefreshCw size={16} /> 重新下单
+          </button>
+        )}
+        <Link href={`/m/${merchantId}`} style={{ flex: order.status === 'cancelled' ? 1 : 'auto', width: order.status === 'cancelled' ? 'auto' : '100%' }}>
           <button className="btn btn-outline btn-block" style={{ background: 'white', height: '44px', borderRadius: '22px' }}>
             <ArrowLeft size={16} /> 返回菜单
           </button>

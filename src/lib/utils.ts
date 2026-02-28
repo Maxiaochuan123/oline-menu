@@ -54,3 +54,11 @@ export function speak(text: string) {
 export function lastFourDigits(phone: string): string {
   return phone.slice(-4)
 }
+
+/**
+ * 校验中国大陆手机号
+ * 规则：1开头，第二位 3~9，共 11 位数字
+ */
+export function isValidPhone(phone: string): boolean {
+  return /^1[3-9]\d{9}$/.test(phone)
+}

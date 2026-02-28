@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef, use } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Merchant, Category, MenuItem, CartItem, Order } from '@/lib/types'
-import { formatPrice, isWechat } from '@/lib/utils'
-import { 
-  Plus, Minus, ShoppingBag, Search, X, 
-  MapPin, Phone, User, Clock, Briefcase, UserRound, ArrowRight, Package
+import type { Merchant, Category, MenuItem, CartItem, Order, UserCoupon, Coupon } from '@/lib/types'
+import { formatPrice, isWechat, isValidPhone } from '@/lib/utils'
+import { calcDiscount, getVipLevel, VIP_LEVELS, getPointsToNextLevel, getCouponEligibleAmount } from '@/lib/membership'
+import {
+  Plus, Minus, ShoppingBag, Search, X,
+  MapPin, Phone, User, Clock, Briefcase, UserRound, ArrowRight, Package, Gift, Star, ChevronRight
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import WechatGuide from '@/components/customer/WechatGuide'
@@ -22,7 +23,13 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [activeCategory, setActiveCategory] = useState<string>('')
   
-  const [cart, setCart] = useState<CartItem[]>([])
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const saved = localStorage.getItem(`cart_${merchantId}`)
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [isWechatEnv, setIsWechatEnv] = useState(false)
@@ -42,17 +49,27 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   // 进行中的订单（悬浮进度条）
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
 
+  // 会员 & 优惠券
+  const [customerPoints, setCustomerPoints] = useState(0)
+  const [customerId, setCustomerId] = useState<string | null>(null)
+  const [availableCoupons, setAvailableCoupons] = useState<UserCoupon[]>([])
+  const [allMyCoupons, setAllMyCoupons] = useState<UserCoupon[]>([])
+  const [selectedCoupons, setSelectedCoupons] = useState<UserCoupon[]>([])
+  const [centerCoupons, setCenterCoupons] = useState<Coupon[]>([])
+  const [showVipInfo, setShowVipInfo] = useState(false)
+  const [showCouponPicker, setShowCouponPicker] = useState(false)
+  const [showLoginBanner, setShowLoginBanner] = useState(false)
+  const [showCouponCenter, setShowCouponCenter] = useState(false)
+  const [couponCenterTab, setCouponCenterTab] = useState<'claim' | 'unused' | 'used' | 'invalid'>('claim')
+  const [claimLoading, setClaimLoading] = useState<string | null>(null)
+
   const itemsRef = useRef<Record<string, HTMLDivElement | null>>({})
 
   useEffect(() => {
     setIsWechatEnv(isWechat())
     loadData()
-    
-    // 加载购物车缓存
-    const savedCart = localStorage.getItem(`cart_${merchantId}`)
-    if (savedCart) {
-      try { setCart(JSON.parse(savedCart)) } catch { /* ignore */ }
-    }
+
+
 
     // 尝试带出用户信息
     const lastUser = localStorage.getItem(`customer_info_${merchantId}`)
@@ -62,9 +79,12 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         setCustomerName(info.name)
         setPhone(info.phone)
         setAddress(info.address)
-        // 查询该手机号进行中的订单
         loadActiveOrder(info.phone)
+        loadCustomerBenefits(info.phone)
       } catch { /* ignore */ }
+    } else {
+      // 新用户：延迟展示登录悬浮按钮
+      setTimeout(() => setShowLoginBanner(true), 1500)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [merchantId])
@@ -72,6 +92,37 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   useEffect(() => {
     localStorage.setItem(`cart_${merchantId}`, JSON.stringify(cart))
   }, [cart, merchantId])
+
+  // 手机号填写完整后（11位）自动加载积分和优惠券
+  useEffect(() => {
+    if (phone.length === 11) {
+      loadCustomerBenefits(phone)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phone])
+
+  // 处理登录后重定向自动发券
+  useEffect(() => {
+    if (customerId) {
+      const pendingCouponId = localStorage.getItem('pending_claim_coupon')
+      if (pendingCouponId) {
+        localStorage.removeItem('pending_claim_coupon')
+        // 自动触发领取
+        ;(async () => {
+          try {
+            const { data: cpn } = await supabase.from('coupons').select('*').eq('id', pendingCouponId).single()
+            if (cpn) {
+              await handleClaimCoupon(cpn, true)
+            }
+          } catch (e) {
+            console.error('自动领券失败', e)
+          }
+        })()
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, merchantId])
+
 
   // 加载该手机号进行中的最新订单
   async function loadActiveOrder(ph: string) {
@@ -108,10 +159,12 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   }, [phone, supabase])
 
   async function loadData() {
-    const [mRes, cRes, iRes] = await Promise.all([
+    const [mRes, cRes, iRes, centerRes] = await Promise.all([
       supabase.from('merchants').select('*').eq('id', merchantId).single(),
       supabase.from('categories').select('*').eq('merchant_id', merchantId).order('sort_order'),
-      supabase.from('menu_items').select('*').eq('merchant_id', merchantId).eq('is_available', true)
+      supabase.from('menu_items').select('*').eq('merchant_id', merchantId).eq('is_available', true),
+      // 注意：全局券在新结构中没有 target_type，或者被置为 null 甚至 'all'。这取决于商家前端建券时的保存。
+      supabase.from('coupons').select('*').eq('merchant_id', merchantId).eq('status', 'active').order('created_at', { ascending: false })
     ])
 
     if (mRes.data) setMerchant(mRes.data)
@@ -120,7 +173,68 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       if (cRes.data.length > 0) setActiveCategory(cRes.data[0].id)
     }
     if (iRes.data) setMenuItems(iRes.data)
+    if (centerRes.data) setCenterCoupons(centerRes.data)
     setLoading(false)
+  }
+
+  /** 根据手机号加载客户积分和可用优惠券 */
+  async function loadCustomerBenefits(ph: string) {
+    try {
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('id, points')
+        .eq('merchant_id', merchantId)
+        .eq('phone', ph)
+        .maybeSingle()
+
+      if (!cust) return
+      setCustomerId(cust.id)
+      setCustomerPoints(cust.points ?? 0)
+
+      // 查询用户所有的参与优惠券记录（含已使用、失效等）
+      const { data: ucData } = await supabase
+        .from('user_coupons')
+        .select('*, coupon:coupons(*)')
+        .eq('customer_id', cust.id)
+        
+      if (ucData) {
+        setAllMyCoupons(ucData)
+        // 从所有记录里过滤出未使用且未过期的有效券
+        const valid = ucData.filter(uc => uc.status === 'unused' && new Date(uc.expires_at) > new Date() && uc.coupon?.status === 'active')
+        setAvailableCoupons(valid)
+      }
+    } catch (e) {
+      console.error('load benefits error', e)
+    }
+  }
+
+  // 领券中心 - 领取逻辑
+  async function handleClaimCoupon(coupon: Coupon, isAutoClaim = false) {
+    if (!customerId) {
+      localStorage.setItem('pending_claim_coupon', coupon.id)
+      router.push(`/login?redirect=/m/${merchantId}`)
+      return
+    }
+    setClaimLoading(coupon.id)
+    try {
+      const { data: success, error } = await supabase.rpc('claim_coupon', {
+        p_coupon_id: coupon.id,
+        p_customer_id: customerId,
+        p_expires_at: new Date(Date.now() + coupon.expiry_days * 24 * 60 * 60 * 1000).toISOString()
+      })
+      if (error) throw error
+      if (success) {
+        alert(isAutoClaim ? `欢迎回来！为您自动领取了【${coupon.title}】` : '抢券成功！')
+        if (phone) loadCustomerBenefits(phone)
+        loadData() // 刷新余量
+      } else {
+        alert(isAutoClaim ? `【${coupon.title}】您已经领过或已被抢光啦` : '抢券失败：您可能已经领过，或者已经被抢完啦！')
+      }
+    } catch (err: unknown) {
+      alert('抢券异常: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setClaimLoading(null)
+    }
   }
 
   function addToCart(item: MenuItem) {
@@ -146,51 +260,144 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const totalAmount = cart.reduce((sum, item) => sum + item.menuItem.price * item.quantity, 0)
   const totalCount = cart.reduce((sum, item) => sum + item.quantity, 0)
 
+  // 自动选择最优优惠券（最优非叠加券 + 所有可叠加券），只选择实际符合可用金额门槛的券
+  useEffect(() => {
+    if (availableCoupons.length === 0) return
+    const eligible = availableCoupons.filter(uc => uc.coupon && getCouponEligibleAmount(uc.coupon, cart) >= uc.coupon.min_spend)
+    const nonStackable = eligible.filter(uc => !uc.coupon?.stackable).sort((a, b) => (b.coupon?.amount ?? 0) - (a.coupon?.amount ?? 0))
+    const stackable = eligible.filter(uc => uc.coupon?.stackable)
+    const best: UserCoupon[] = []
+    if (nonStackable[0]) best.push(nonStackable[0])
+    best.push(...stackable)
+    setSelectedCoupons(prev => {
+      // 有手动选择过且仍有效时不覆盖
+      if (prev.length > 0 && prev.every(p => p.coupon && getCouponEligibleAmount(p.coupon, cart) >= p.coupon.min_spend)) return prev
+      return best
+    })
+  }, [availableCoupons, cart])
+
+  // 计算凑单提示 (P5-A 修正为精确门槛)
+  const couponHint = (() => {
+    if (totalCount === 0 || availableCoupons.length === 0) return null
+    // 找出尚未满足条件的券中，差额最小的 (基于该券特定范围下的计算金额)
+    const unreached = availableCoupons.filter(uc => uc.coupon && getCouponEligibleAmount(uc.coupon, cart) < uc.coupon.min_spend)
+    if (unreached.length > 0) {
+      unreached.sort((a, b) => {
+        const diffA = (a.coupon?.min_spend ?? 0) - getCouponEligibleAmount(a.coupon!, cart)
+        const diffB = (b.coupon?.min_spend ?? 0) - getCouponEligibleAmount(b.coupon!, cart)
+        return diffA - diffB
+      })
+      const target = unreached[0]
+      const eligibleAmount = getCouponEligibleAmount(target.coupon!, cart)
+      const diff = (target.coupon?.min_spend ?? 0) - eligibleAmount
+      
+      // 如果是一分钱都没达标(没点该分类)的定向券
+      if (eligibleAmount === 0 && target.coupon?.target_type && target.coupon.target_type !== 'all') {
+         // 我们可以在列表详细提示，顶部横幅先提示金额差或者略过
+         return null // 交由列表提示，或显示：{ type: '差额', text: `您还未添加【${target.coupon?.title}】指定商品` }
+      }
+      return { type: '差额', text: `还差 ¥${diff.toFixed(2)} 即可使用【${target.coupon?.title}】` }
+    }
+    // 全都满足了
+    if (selectedCoupons.length > 0) {
+      const titles = selectedCoupons.map(c => c.coupon?.title).join(' 及 ')
+      return { type: '达标', text: `已为您自动使用【${titles}】` }
+    }
+    return null
+  })()
+
+  // 折扣计算
+  const discountResult = calcDiscount({
+    originalAmount: totalAmount,
+    points: customerPoints,
+    couponAmounts: selectedCoupons.map(uc => ({
+      amount: uc.coupon?.amount ?? 0,
+      minSpend: uc.coupon?.min_spend ?? 0,
+    })),
+  })
+  const finalAmount = discountResult.finalAmount
+  const vipLevel = discountResult.vipLevel
+  const vipDiscountAmount = discountResult.vipDiscountAmount
+
+  // 动态计算底部区域高度（购物车栏56px + 折扣明细区）
+  const discountRowCount = totalCount > 0 ? [
+    vipLevel.rate < 1,
+    !!(selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0),
+    availableCoupons.length > 0 && selectedCoupons.length === 0,
+    customerPoints + Math.floor(totalAmount) < 100,
+  ].filter(Boolean).length : 0
+  const bottomBarHeight = totalCount > 0 ? 56 + (discountRowCount > 0 ? discountRowCount * 22 + 16 : 0) : 0
+
   async function handleSubmitOrder() {
     if (!customerName || !phone || !address || !scheduledTime) {
       alert('请填写完整的配送信息')
+      return
+    }
+    if (!isValidPhone(phone)) {
+      alert('请输入有效的手机号（1开头，11位数字）')
       return
     }
     setSubmitting(true)
 
     try {
       // 1. 同步/创建客户信息
-      let customerId = null
+      let cid = customerId
       const { data: customerData } = await supabase
         .from('customers')
-        .select('id')
+        .select('id, points')
         .eq('merchant_id', merchantId)
         .eq('phone', phone)
         .maybeSingle()
 
       if (customerData) {
-        customerId = customerData.id
-        await supabase.from('customers').update({ name: customerName, address }).eq('id', customerId)
+        cid = customerData.id
+        // 下单时同步常用信息和积分（每 1元 = 1积分）
+        await supabase.from('customers').update({
+          name: customerName,
+          address,
+          points: (customerData.points ?? 0) + Math.floor(finalAmount),
+          order_count: (customerData as { order_count?: number }).order_count ?? 0 + 1,
+          total_spent: ((customerData as { total_spent?: number }).total_spent ?? 0) + finalAmount,
+        }).eq('id', cid)
       } else {
         const { data: newCustomer } = await supabase
           .from('customers')
-          .insert({ merchant_id: merchantId, name: customerName, phone, address })
+          .insert({
+            merchant_id: merchantId,
+            name: customerName,
+            phone,
+            address,
+            order_count: 1,
+            total_spent: finalAmount,
+            points: Math.floor(finalAmount),
+          })
           .select('id')
           .single()
-        customerId = newCustomer?.id
+        cid = newCustomer?.id ?? null
       }
 
       // 保存信息到本地，下次自动带出
       localStorage.setItem(`customer_info_${merchantId}`, JSON.stringify({ name: customerName, phone, address }))
 
-      // 2. 创建订单
+      // 2. 创建订单（带入折扣字段）
       const { data: order, error: orderErr } = await supabase
         .from('orders')
         .insert({
           merchant_id: merchantId,
-          customer_id: customerId,
+          customer_id: cid,
           order_type: orderType,
           phone,
           customer_name: customerName,
           address,
           scheduled_time: new Date(scheduledTime).toISOString(),
-          total_amount: totalAmount,
-          status: 'pending'
+          // 金额字段
+          original_amount: totalAmount,
+          total_amount: finalAmount,
+          vip_discount_rate: discountResult.vipLevel.rate,
+          vip_discount_amount: discountResult.vipDiscountAmount,
+          coupon_discount_amount: discountResult.couponDiscountAmount,
+          coupon_id: selectedCoupons[0]?.coupon_id ?? null,
+          status: 'pending',
         })
         .select('id')
         .single()
@@ -206,15 +413,21 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         quantity: item.quantity,
         remark: item.remark
       }))
-
       const { error: itemsErr } = await supabase.from('order_items').insert(orderItems)
       if (itemsErr) throw itemsErr
 
-      // 下单完成，弹窗支付告知
+      // 4. 标记优惠券已使用
+      if (selectedCoupons.length > 0) {
+        await supabase
+          .from('user_coupons')
+          .update({ status: 'used', used_at: new Date().toISOString() })
+          .in('id', selectedCoupons.map(c => c.id))
+      }
+
       setShowOrderForm(false)
       setCart([])
+      setSelectedCoupons([])
       localStorage.removeItem(`cart_${merchantId}`)
-      // 写入最新订单 ID，供汇总返回时展示
       localStorage.setItem(`last_order_${merchantId}`, order.id)
       router.push(`/m/${merchantId}/order/${order.id}`)
     } catch (err: unknown) {
@@ -266,6 +479,13 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     console.log('[NewItems] 符合条件新品:', newItems.length, newItems.map(i => ({ name: i.name, is_new: i.is_new, new_until: i.new_until })))
   }
 
+  // 过滤出真正可以手动领取的券（排除已领过、已抢光的）
+  const claimableCoupons = centerCoupons.filter(c => {
+    const isClaimed = allMyCoupons.some((uc: UserCoupon) => uc.coupon_id === c.id)
+    const isSoldOut = c.total_quantity !== null && (c.claimed_count || 0) >= c.total_quantity
+    return !isClaimed && !isSoldOut
+  })
+
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* 搜索栏 */}
@@ -273,7 +493,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         padding: '12px 16px', background: 'white', 
         borderBottom: '1px solid var(--color-border)', flexShrink: 0 
       }}>
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', marginBottom: (centerCoupons.length > 0 || allMyCoupons.length > 0) ? '12px' : 0 }}>
           <Search size={16} color="#a8a29e" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
           <input 
             className="input" 
@@ -282,6 +502,31 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             onChange={(e) => setSearch(e.target.value)}
             style={{ paddingLeft: '36px', height: '40px' }}
           />
+        </div>
+
+        {/* 领券中心常驻入口 */}
+        <div 
+          onClick={() => setShowCouponCenter(true)}
+          style={{ 
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+            background: '#fff7ed', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer',
+            marginTop: '12px'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Gift size={16} color="#ea580c" />
+            <span style={{ fontSize: '13px', color: '#c2410c', fontWeight: '600' }}>
+              领券中心
+              {claimableCoupons.length > 0 ? (
+                <span style={{ marginLeft: '6px', background: '#ea580c', color: 'white', padding: '1px 6px', borderRadius: '10px', fontSize: '11px' }}>{claimableCoupons.length}张待领取</span>
+              ) : (
+                <span style={{ marginLeft: '6px', color: '#ea580c', opacity: 0.8, fontSize: '11px' }}>进入查看</span>
+              )}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#ea580c', fontSize: '12px' }}>
+            我的卡券({allMyCoupons.length}) <ChevronRight size={14} />
+          </div>
         </div>
       </header>
 
@@ -306,7 +551,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         )}
 
         {/* 右侧菜品 */}
-        <div className="menu-items">
+        <div className="menu-items" style={{ paddingBottom: `${bottomBarHeight + 16}px` }}>
           {categories.map(cat => {
             const itemsInCat = filteredItems.filter(i => i.category_id === cat.id)
             if (itemsInCat.length === 0) return null
@@ -369,13 +614,110 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         </div>
       </div>
 
+      {/* 折扣明细栏（独立浮在购物车栏上方） */}
+      {totalCount > 0 && (vipLevel.rate < 1 || selectedCoupons.length > 0 || (availableCoupons.length > 0 && selectedCoupons.length === 0) || (customerPoints + Math.floor(totalAmount) < 100) || couponHint) && (
+        <div style={{
+          position: 'fixed', bottom: '56px', left: 0, right: 0, zIndex: 19,
+          background: '#1c1917', padding: '8px 16px',
+          display: 'flex', flexDirection: 'column', gap: '4px',
+          borderTop: '1px solid rgba(255,255,255,0.08)'
+        }}>
+          {/* VIP 折扣行 */}
+          {vipLevel.rate < 1 && (
+            <div
+              onClick={() => setShowVipInfo(true)}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', cursor: 'pointer' }}
+            >
+              <span style={{ color: '#4ade80' }}>⭐ {vipLevel.label} {vipLevel.discount}</span>
+              <span style={{ color: '#4ade80', fontWeight: '600' }}>-¥{vipDiscountAmount.toFixed(2)}</span>
+            </div>
+          )}
+
+          {/* 优惠券行 */}
+          {selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0 && (
+            <div
+              onClick={() => setShowCouponPicker(true)}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', cursor: 'pointer' }}
+            >
+              <span style={{ color: '#fbbf24' }}>🎫 {selectedCoupons.map(c => c.coupon?.title).join(' + ') || '优惠券'}</span>
+              <span style={{ color: '#fbbf24', fontWeight: '600' }}>-¥{discountResult.couponDiscountAmount.toFixed(2)}</span>
+            </div>
+          )}
+
+          {/* 可用券提示 */}
+          {(() => {
+            if (availableCoupons.length === 0) return null;
+            if (selectedCoupons.length > 0) return null;
+            const trulyAvailableCount = availableCoupons.filter(uc => uc.coupon && getCouponEligibleAmount(uc.coupon, cart) >= uc.coupon.min_spend).length;
+            return (
+              <div
+                onClick={() => setShowCouponPicker(true)}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', cursor: 'pointer' }}
+              >
+                <span style={{ color: trulyAvailableCount > 0 ? '#fb923c' : '#aaa' }}>🎫 {trulyAvailableCount > 0 ? `有 ${trulyAvailableCount} 张券可用` : '查看不可用券'}</span>
+                <ChevronRight size={12} color={trulyAvailableCount > 0 ? '#fb923c' : '#aaa'} />
+              </div>
+            )
+          })()}
+
+          {/* 凑单提示 / 发券提示 (P5-A 修正) */}
+          {couponHint && (
+            <div
+              style={{ fontSize: '11px', color: couponHint.type === '达标' ? '#4ade80' : '#fdba74', textAlign: 'center', paddingTop: '2px', fontWeight: '600' }}
+            >
+              {couponHint.type === '达标' ? '✅ ' : '🔥 '}{couponHint.text}
+            </div>
+          )}
+
+          {/* VIP 凑单提示 */}
+          {(() => {
+            const currentTotalPts = customerPoints + Math.floor(totalAmount);
+            const nextLevelInfo = getPointsToNextLevel(currentTotalPts);
+            if (!nextLevelInfo) return null;
+            return (
+              <div
+                onClick={() => setShowVipInfo(true)}
+                style={{ fontSize: '11px', color: '#fdba74', cursor: 'pointer', textAlign: 'center', paddingTop: '2px' }}
+              >
+                🔥 再加 ¥{nextLevelInfo.needed.toFixed(0)} 可享 {nextLevelInfo.nextLevel.label} {nextLevelInfo.nextLevel.discount}
+              </div>
+            )
+          })()}
+        </div>
+      )}
+
+      {/* 全局动效挂载：右侧悬浮领券按钮 (P4) */}
+      {claimableCoupons.length > 0 && (
+        <div
+          onClick={() => setShowCouponCenter(true)}
+          className="pulsing-coupon-btn"
+          style={{
+            position: 'fixed', right: '16px', bottom: activeOrder ? '150px' : totalCount > 0 ? '70px' : '20px',
+            zIndex: 40, width: '48px', height: '48px', borderRadius: '50%',
+            background: 'linear-gradient(135deg, #ffedd5, #ffedd5)',
+            boxShadow: '0 4px 12px rgba(234,88,12,0.3)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', border: '2px solid #ea580c',
+            transition: 'bottom 0.3s ease'
+          }}
+        >
+          <Gift size={20} color="#ea580c" style={{ marginBottom: '-2px' }} />
+          <span style={{ fontSize: '10px', fontWeight: '800', color: '#ea580c' }}>抢券</span>
+          {/* 未读气泡小红点 */}
+          <div style={{ position: 'absolute', top: '-4px', right: '-4px', background: '#ef4444', color: 'white', fontSize: '10px', fontWeight: 'bold', width: '18px', height: '18px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid white' }}>
+            {claimableCoupons.length}
+          </div>
+        </div>
+      )}
+
       {/* 购物车底栏 */}
       {totalCount > 0 && (
-        <div className="cart-bar animate-slide-up">
-          <div 
+        <div className="cart-bar animate-slide-up" style={{ display: 'flex', flexDirection: 'column', padding: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '12px 24px' }}>
+          <div
             className="cart-badge" data-count={totalCount}
             onClick={() => setShowCart(true)}
-            style={{ 
+            style={{
               width: 44, height: 44, borderRadius: '50%', background: 'var(--color-primary)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               marginTop: -20, border: '4px solid #292524', cursor: 'pointer'
@@ -384,16 +726,31 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             <ShoppingBag size={22} color="white" />
           </div>
           <div style={{ marginLeft: '12px', flex: 1, cursor: 'pointer' }} onClick={() => setShowCart(true)}>
-            <div style={{ fontSize: '18px', fontWeight: '700' }}>{formatPrice(totalAmount)}</div>
-            <div style={{ fontSize: '11px', color: '#a8a29e' }}>另需配送费或自提</div>
+            <div style={{ fontSize: '18px', fontWeight: '700' }}>
+              {vipLevel.rate < 1 || selectedCoupons.length > 0 ? (
+                <>
+                  <span style={{ color: 'var(--color-primary)' }}>{formatPrice(finalAmount)}</span>
+                  <span style={{ fontSize: '12px', color: '#aaa', textDecoration: 'line-through', marginLeft: '6px' }}>{formatPrice(totalAmount)}</span>
+                </>
+              ) : formatPrice(totalAmount)}
+            </div>
+            <div style={{ fontSize: '11px', color: '#a8a29e' }}>
+              {(vipLevel.rate < 1 || selectedCoupons.length > 0)
+                ? `已省 ¥${(totalAmount - finalAmount).toFixed(1)}`
+                : '另需配送费或自提'}
+            </div>
           </div>
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             style={{ borderRadius: '25px', padding: '10px 24px', fontSize: '16px' }}
-            onClick={() => setShowOrderForm(true)}
+            onClick={() => {
+              setShowOrderForm(true)
+              if (phone.length === 11) loadCustomerBenefits(phone)
+            }}
           >
             去下单
           </button>
+          </div>
         </div>
       )}
 
@@ -430,6 +787,44 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             </div>
             <div style={{ textAlign: 'right', marginTop: '10px' }}>
               <button onClick={() => setCart([])} style={{ fontSize: '12px', color: '#999', background: 'none', border: 'none' }}>清空购物车</button>
+            </div>
+
+            {/* 折扣 & 优惠券明细 */}
+            <div style={{ marginTop: '12px', padding: '12px', background: '#fafaf9', borderRadius: '10px', borderTop: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                <span style={{ color: '#888' }}>商品合计</span>
+                <span style={{ fontWeight: '600' }}>{formatPrice(totalAmount)}</span>
+              </div>
+
+              {vipLevel.rate < 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                  <span style={{ color: '#22c55e' }}>⭐ {vipLevel.label} {vipLevel.discount}</span>
+                  <span style={{ color: '#22c55e', fontWeight: '600' }}>-{formatPrice(vipDiscountAmount)}</span>
+                </div>
+              )}
+
+              {selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                  <span style={{ color: '#f59e0b' }}>🎫 {selectedCoupons.map(c => c.coupon?.title).join(' + ')}</span>
+                  <span style={{ color: '#f59e0b', fontWeight: '600' }}>-{formatPrice(discountResult.couponDiscountAmount)}</span>
+                </div>
+              )}
+
+              {/* 可用券提示 */}
+              {availableCoupons.length > 0 && selectedCoupons.length === 0 && (
+                <div
+                  onClick={() => { setShowCart(false); setShowCouponPicker(true) }}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '6px', cursor: 'pointer', color: '#ef4444' }}
+                >
+                  <span>🎫 有 {availableCoupons.length} 张优惠券可用</span>
+                  <ChevronRight size={14} />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '16px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #e5e5e5' }}>
+                <span>合计</span>
+                <span style={{ color: 'var(--color-primary)' }}>{formatPrice(finalAmount)}</span>
+              </div>
             </div>
           </div>
         </>
@@ -491,7 +886,14 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
                     <Phone size={14} /> 联系手机
                   </label>
-                  <input className="input" type="tel" placeholder="重要：配送员将联系此号码" value={phone} onChange={e => setPhone(e.target.value)} />
+                  <input className="input" type="tel" placeholder="重要：配送员将联系此号码" value={phone} onChange={e => {
+                    const v = e.target.value.replace(/\D/g, '').slice(0, 11)
+                    setPhone(v)
+                    if (v.length === 11) loadCustomerBenefits(v)
+                  }} maxLength={11} />
+                  {phone.length > 0 && !isValidPhone(phone) && (
+                    <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>请输入有效的手机号（1开头，11位数字）</p>
+                  )}
                 </div>
                 <div>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
@@ -507,6 +909,35 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 </div>
               </div>
 
+              {/* VIP 等级权益入口 */}
+              <div
+                className="card"
+                onClick={() => setShowVipInfo(true)}
+                style={{ marginBottom: '20px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '36px', height: '36px', borderRadius: '10px',
+                    background: `linear-gradient(135deg, ${vipLevel.color}, ${vipLevel.color}88)`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    <Star size={18} color="white" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: '700', color: vipLevel.color }}>
+                      {vipLevel.label} · {vipLevel.description}
+                      {vipLevel.rate < 1 && <span style={{ fontSize: '12px', marginLeft: '6px' }}>{vipLevel.discount}</span>}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#aaa', marginTop: '2px' }}>
+                      {customerPoints + Math.floor(totalAmount)} 积分（含本单）
+                      {vipLevel.maxPoints !== -1 && (customerPoints + Math.floor(totalAmount)) < vipLevel.maxPoints + 1
+                        && ` · 再积 ${vipLevel.maxPoints + 1 - customerPoints - Math.floor(totalAmount)} 分升下一级`}
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight size={16} color="#ccc" />
+              </div>
+
               {/* 订单预览 */}
               <div className="card">
                 <h4 style={{ fontSize: '14px', fontWeight: '800', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid #f5f5f4' }}>菜品详情</h4>
@@ -516,11 +947,44 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                     <span style={{ fontWeight: '600' }}>{formatPrice(item.menuItem.price * item.quantity)}</span>
                   </div>
                 ))}
+
+                {/* 折扣明细 */}
+                {discountResult.vipDiscountAmount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#22c55e', marginTop: '8px' }}>
+                    <span>🌟 {vipLevel.label} {vipLevel.discount} 优惠</span>
+                    <span>-{formatPrice(discountResult.vipDiscountAmount)}</span>
+                  </div>
+                )}
+                {discountResult.couponDiscountAmount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#f59e0b', marginTop: '4px' }}>
+                    <span>🎫 优惠券扣减</span>
+                    <span>-{formatPrice(discountResult.couponDiscountAmount)}</span>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '18px', marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #ddd' }}>
                   <span>应付合计</span>
-                  <span style={{ color: 'var(--color-primary)' }}>{formatPrice(totalAmount)}</span>
+                  <span style={{ color: 'var(--color-primary)' }}>{formatPrice(finalAmount)}</span>
                 </div>
               </div>
+
+              {/* 优惠券选择入口 */}
+              {availableCoupons.length > 0 && (
+                <div
+                  className="card"
+                  style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                  onClick={() => setShowCouponPicker(true)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}>
+                    <Gift size={16} color="#f59e0b" />
+                    <span style={{ fontWeight: '600' }}>优惠券</span>
+                    {selectedCoupons.length > 0
+                      ? <span style={{ color: '#f59e0b', fontWeight: '700' }}>-￥{selectedCoupons.reduce((s, c) => s + (c.coupon?.amount ?? 0), 0).toFixed(2)} ({selectedCoupons.length}张)</span>
+                      : <span style={{ color: '#aaa', fontSize: '13px' }}>有 {availableCoupons.length} 张可用</span>}
+                  </div>
+                  <ChevronRight size={16} color="#bbb" />
+                </div>
+              )}
 
               <div style={{ 
                 marginTop: '16px', padding: '12px', background: '#fef2f2', 
@@ -546,6 +1010,326 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
       {/* 新品轮播弹窗组件 */}
       <NewItemsCarousel items={newItems} onAdd={addToCart} />
+
+      {/* 未登录用户悬浮登录拉引刕 */}
+      {showLoginBanner && (
+        <div
+          onClick={() => router.push(`/login?redirect=/m/${merchantId}`)}
+          style={{
+            position: 'fixed', bottom: totalCount > 0 ? '80px' : '20px', left: '50%',
+            transform: 'translateX(-50%)', zIndex: 60,
+            background: 'linear-gradient(135deg, #f97316, #ef4444)',
+            borderRadius: '40px', padding: '12px 20px',
+            display: 'flex', alignItems: 'center', gap: '10px',
+            boxShadow: '0 8px 24px rgba(249,115,22,0.4)',
+            cursor: 'pointer', whiteSpace: 'nowrap',
+            animation: 'slideUp 0.4s ease',
+          }}
+        >
+          <Gift size={18} color="white" />
+          <span style={{ color: 'white', fontWeight: '700', fontSize: '14px' }}>登录即领 5 元立减券</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowLoginBanner(false) }}
+            style={{ background: 'rgba(255,255,255,0.3)', border: 'none', borderRadius: '50%', width: 20, height: 20, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          >
+            <X size={12} color="white" />
+          </button>
+        </div>
+      )}
+
+      {/* VIP 等级详情幕 */}
+      {showVipInfo && (
+        <>
+          <div className="overlay" style={{ zIndex: 200 }} onClick={() => setShowVipInfo(false)} />
+          <div className="dialog" style={{ zIndex: 210, maxHeight: '80vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontWeight: '800', fontSize: '18px' }}>会员等级优惠</h3>
+              <button onClick={() => setShowVipInfo(false)} style={{ background: 'none', border: 'none' }}><X size={20} /></button>
+            </div>
+            <div style={{ fontSize: '13px', color: '#666', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              当前积分：<span style={{ fontWeight: '700', color: '#1c1917' }}>⭐ {customerPoints} </span>
+              {totalAmount > 0 && <span style={{ color: '#f97316', fontSize: '12px' }}>(+{Math.floor(totalAmount)} 预得)</span>}
+            </div>
+            {VIP_LEVELS.slice(1).map(lv => {
+              const potentialPoints = customerPoints + Math.floor(totalAmount)
+              const targetLevel = getVipLevel(potentialPoints)
+              const isTargetLevel = targetLevel.level === lv.level
+              const isPastLevel = targetLevel.level > lv.level
+              return (
+                <div key={lv.level} style={{
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  padding: '12px', borderRadius: '12px', marginBottom: '8px',
+                  background: isTargetLevel ? '#fff7ed' : '#f9fafb',
+                  border: isTargetLevel ? '2px solid #f97316' : '1px solid #f0f0f0',
+                  opacity: isPastLevel || isTargetLevel ? 1 : 0.6
+                }}>
+                  <div style={{
+                    width: '40px', height: '40px', borderRadius: '50%',
+                    background: lv.color, display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    <Star size={18} color="white" fill="white" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: '700', fontSize: '15px' }}>{lv.label} · {lv.description}</div>
+                    <div style={{ fontSize: '12px', color: '#aaa', marginTop: '2px' }}>
+                      {lv.maxPoints === -1 ? `积分 ${lv.minPoints}+` : `积分 ${lv.minPoints}~${lv.maxPoints}`}
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: '800', fontSize: '18px', color: lv.color }}>{lv.discount}</div>
+                  {isTargetLevel && (
+                    <div style={{ fontSize: '11px', color: '#f97316', fontWeight: '700' }}>{potentialPoints >= lv.minPoints ? '本单达成' : '升级中'}</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {/* 领券中心及我的券弹窗 (P5-C) */}
+      {showCouponCenter && (
+        <>
+          <div className="overlay" style={{ zIndex: 200 }} onClick={() => setShowCouponCenter(false)} />
+          <div className="dialog" style={{ zIndex: 210, position: 'fixed', bottom: 0, top: 'auto', left: 0, right: 0, transform: 'none', width: '100%', maxWidth: 'none', borderRadius: '20px 20px 0 0', padding: '20px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
+              <h3 style={{ fontWeight: '800' }}>领券中心</h3>
+              <button onClick={() => setShowCouponCenter(false)} style={{ background: 'none', border: 'none' }}><X size={20} /></button>
+            </div>
+            
+            {/* 顶部 4 Tab */}
+            <div style={{ display: 'flex', gap: '20px', borderBottom: '1px solid #f5f5f4', marginBottom: '16px', flexShrink: 0 }}>
+              {(['claim', 'unused', 'used', 'invalid'] as const).map(tab => (
+                <div 
+                  key={tab}
+                  onClick={() => setCouponCenterTab(tab)}
+                  style={{ 
+                    padding: '8px 0', fontSize: '13px', fontWeight: couponCenterTab === tab ? '700' : '400',
+                    color: couponCenterTab === tab ? '#ea580c' : '#78716c', cursor: 'pointer',
+                    borderBottom: couponCenterTab === tab ? '2px solid #ea580c' : '2px solid transparent'
+                  }}
+                >
+                  {tab === 'claim' ? '待领取' : tab === 'unused' ? '未使用' : tab === 'used' ? '已使用' : '已失效'}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {couponCenterTab === 'claim' && (
+                centerCoupons.length === 0 ? (
+                  <p style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '40px 0' }}>暂无可领取的优惠券</p>
+                ) : (
+                  centerCoupons.map(c => {
+                    const isClaimed = allMyCoupons.some((uc: UserCoupon) => uc.coupon_id === c.id)
+                    const isSoldOut = c.total_quantity !== null && c.claimed_count >= c.total_quantity
+                    return (
+                      <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff7ed', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: '1px solid #ffedd5' }}>
+                        <div>
+                          <div style={{ fontWeight: '700', fontSize: '16px', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {c.title}
+                            {c.stackable && <span style={{ fontSize: '10px', background: '#ede9fe', color: '#7c3aed', padding: '2px 4px', borderRadius: '4px' }}>可叠加</span>}
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#f97316', marginTop: '4px' }}>
+                            {c.min_spend > 0 ? `满 ¥${c.min_spend} 减 ¥${c.amount}` : `无门槛减 ¥${c.amount}`}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#f97316', opacity: 0.8, marginTop: '4px' }}>
+                            有效期 {c.expiry_days} 天
+                            {c.total_quantity !== null && ` · 限量 ${c.total_quantity} 张 (已领 ${c.claimed_count})`}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleClaimCoupon(c)}
+                          disabled={isClaimed || isSoldOut || claimLoading === c.id}
+                          style={{
+                            padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: '700', border: 'none',
+                            background: isClaimed ? '#fdba74' : isSoldOut ? '#e5e5e5' : '#ea580c',
+                            color: isClaimed || isSoldOut ? 'white' : 'white',
+                            cursor: isClaimed || isSoldOut ? 'not-allowed' : 'pointer',
+                            transform: claimLoading === c.id ? 'scale(0.95)' : 'none',
+                            transition: 'transform 0.15s ease'
+                          }}
+                        >
+                          {claimLoading === c.id ? '...' : isClaimed ? '已领取' : isSoldOut ? '已抢光' : '抢券'}
+                        </button>
+                      </div>
+                    )
+                  })
+                )
+              )}
+
+              {couponCenterTab === 'unused' && (
+                availableCoupons.length === 0 ? (
+                  <p style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '40px 0' }}>暂无可用优惠券</p>
+                ) : (
+                  availableCoupons.map(uc => {
+                    const c = uc.coupon!
+                    return (
+                      <div key={uc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff7ed', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: '1px solid #ffedd5' }}>
+                        <div>
+                          <div style={{ fontWeight: '700', fontSize: '16px', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {c.title}
+                            {c.stackable && <span style={{ fontSize: '10px', background: '#ede9fe', color: '#7c3aed', padding: '2px 4px', borderRadius: '4px' }}>可叠加</span>}
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#f97316', marginTop: '4px' }}>
+                            {c.min_spend > 0 ? `满 ¥${c.min_spend} 减 ¥${c.amount}` : `无门槛减 ¥${c.amount}`}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#f97316', opacity: 0.8, marginTop: '4px' }}>
+                            {new Date(uc.expires_at).toLocaleDateString()} 到期
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setShowCouponCenter(false)}
+                          style={{
+                            padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: '700', border: '1px solid #ea580c',
+                            background: 'white', color: '#ea580c', cursor: 'pointer'
+                          }}
+                        >
+                          去使用
+                        </button>
+                      </div>
+                    )
+                  })
+                )
+              )}
+
+              {couponCenterTab === 'used' && (() => {
+                const usedCoupons = allMyCoupons.filter((uc: UserCoupon) => uc.status === 'used')
+                if (usedCoupons.length === 0) return <p style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '40px 0' }}>暂无已使用记录</p>
+                return usedCoupons.map((uc: UserCoupon) => {
+                  const c = uc.coupon!
+                  return (
+                    <div key={uc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f5f5f4', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: '1px solid #e7e5e4', opacity: 0.8 }}>
+                      <div>
+                        <div style={{ fontWeight: '700', fontSize: '16px', color: '#57534e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {c.title}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#78716c', marginTop: '4px' }}>
+                          面值 ¥{c.amount}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#999' }}>已使用</div>
+                    </div>
+                  )
+                })
+              })()}
+
+              {couponCenterTab === 'invalid' && (() => {
+                const invalidCoupons = allMyCoupons.filter((uc: UserCoupon) => uc.status !== 'used' && (new Date(uc.expires_at) <= new Date() || uc.coupon?.status !== 'active'))
+                if (invalidCoupons.length === 0) return <p style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '40px 0' }}>暂无失效记录</p>
+                return invalidCoupons.map((uc: UserCoupon) => {
+                  const c = uc.coupon!
+                  return (
+                    <div key={uc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f5f5f4', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: '1px solid #e7e5e4', opacity: 0.8 }}>
+                      <div>
+                        <div style={{ fontWeight: '700', fontSize: '16px', color: '#57534e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {c.title}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#78716c', marginTop: '4px' }}>
+                          已过期 / 商家已停用
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#999' }}>已失效</div>
+                    </div>
+                  )
+                })
+              })()}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* 优惠券选择弹窗 */}
+      {showCouponPicker && (
+        <>
+          <div className="overlay" style={{ zIndex: 200 }} onClick={() => setShowCouponPicker(false)} />
+          <div className="dialog" style={{ zIndex: 210, position: 'fixed', bottom: 0, top: 'auto', left: 0, right: 0, transform: 'none', width: '100%', maxWidth: 'none', borderRadius: '20px 20px 0 0', padding: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontWeight: '800' }}>选择优惠券</h3>
+              <button onClick={() => setShowCouponPicker(false)} style={{ background: 'none', border: 'none' }}><X size={20} /></button>
+            </div>
+            <div
+              onClick={() => { setSelectedCoupons([]); setShowCouponPicker(false) }}
+              style={{
+                padding: '14px', borderRadius: '12px', marginBottom: '10px', cursor: 'pointer',
+                border: selectedCoupons.length === 0 ? '2px solid #f97316' : '1px solid #eee',
+                background: selectedCoupons.length === 0 ? '#fff7ed' : 'white',
+              }}
+            >
+              <div style={{ fontWeight: '600' }}>不使用优惠券</div>
+            </div>
+            {availableCoupons.map(uc => {
+              const minSpend = uc.coupon?.min_spend ?? 0
+              const eligibleAmount = uc.coupon ? getCouponEligibleAmount(uc.coupon, cart) : totalAmount
+              const disabled = eligibleAmount < minSpend
+              const gap = minSpend - eligibleAmount
+              const isSelected = selectedCoupons.some(c => c.id === uc.id)
+              
+              const renderDisableReason = () => {
+                if (eligibleAmount === 0 && uc.coupon?.target_type && uc.coupon.target_type !== 'all') {
+                  return '您还未添加该商品'
+                }
+                if (minSpend > 0 && disabled) {
+                  return `还差 ¥${gap.toFixed(0)}，满 ¥${minSpend} 可用`
+                }
+                return `满 ¥${minSpend} 可用`
+              }
+
+              return (
+              <div key={uc.id}
+                onClick={() => {
+                  if (disabled) {
+                    if (eligibleAmount === 0 && uc.coupon?.target_type && uc.coupon.target_type !== 'all') {
+                      alert(`您还未添加该指定商品，无法使用此券哦`)
+                    } else {
+                      alert(`还差 ¥${gap.toFixed(0)} 即可使用此券（满 ¥${minSpend} 可用）`)
+                    }
+                    return
+                  }
+                  if (isSelected) {
+                    setSelectedCoupons(selectedCoupons.filter(c => c.id !== uc.id))
+                  } else {
+                    // 非叠加券替换已有非叠加券; 叠加券追加
+                    if (uc.coupon?.stackable) {
+                      setSelectedCoupons([...selectedCoupons, uc])
+                    } else {
+                      setSelectedCoupons([uc, ...selectedCoupons.filter(c => c.coupon?.stackable)])
+                    }
+                  }
+                }}
+                style={{
+                  padding: '14px', borderRadius: '12px', marginBottom: '10px',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  border: isSelected ? '2px solid #f97316' : '1px solid #eee',
+                  background: disabled ? '#f5f5f4' : isSelected ? '#fff7ed' : 'white',
+                  opacity: disabled ? 0.6 : 1,
+                  filter: disabled ? 'grayscale(80%)' : 'none'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: '700', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {uc.coupon?.title}
+                      {uc.coupon?.stackable && <span style={{ fontSize: '10px', background: '#ede9fe', color: '#7c3aed', padding: '1px 5px', borderRadius: '4px' }}>可叠加</span>}
+                    </div>
+                    <div style={{ fontSize: '12px', color: disabled ? '#ef4444' : '#aaa', marginTop: '4px', fontWeight: disabled ? '600' : 'normal' }}>
+                      {minSpend > 0 ? renderDisableReason() : '无门槛'} · {new Date(uc.expires_at).toLocaleDateString()} 到期
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: '800', color: disabled ? '#ccc' : '#f97316' }}>-￥{uc.coupon?.amount?.toFixed(0)}</div>
+                </div>
+              </div>
+              )
+            })}
+            {selectedCoupons.length > 0 && (
+              <button
+                onClick={() => setShowCouponPicker(false)}
+                className="btn btn-primary btn-block"
+                style={{ marginTop: '8px' }}
+              >确定（已选 {selectedCoupons.length} 张，省 ¥{selectedCoupons.reduce((s, c) => s + (c.coupon?.amount ?? 0), 0).toFixed(0)}）</button>
+            )}
+          </div>
+        </>
+      )}
 
       {/* 悬浮订单进度条 */}
       {activeOrder && (

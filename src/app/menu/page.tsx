@@ -102,7 +102,9 @@ export default function MenuPage() {
       setItemUnit('个')
       setItemCatId(activeCategory || '')
       setItemIsNew(true)
-      setItemNewUntil('')
+      const date = new Date()
+      date.setDate(date.getDate() + 7)
+      setItemNewUntil(date.toISOString().slice(0, 10))
       setItemImagePreview(null)
     }
     setItemImage(null)
