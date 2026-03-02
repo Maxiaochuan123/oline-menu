@@ -33,7 +33,7 @@ export default function OrderManagerModal({
   const [refundInput, setRefundInput] = useState('')
   const [selectedRefundItems, setSelectedRefundItems] = useState<Set<string>>(new Set())
   const [showCancel, setShowCancel] = useState(false)
-  const [pendingStatusOrder, setPendingStatusOrder] = useState<any | null>(null)
+  const [isConfirmingStatus, setIsConfirmingStatus] = useState(false)
 
   // 客服聊天（同时接收普通留言与售后流）
   const [messages, setMessages] = useState<Message[]>([])
@@ -186,14 +186,13 @@ export default function OrderManagerModal({
   function requestStatusUpdate() {
     const idx = STATUS_FLOW.indexOf(order.status)
     if (idx < 0 || idx >= STATUS_FLOW.length - 1) return
-    setPendingStatusOrder(order)
+    setIsConfirmingStatus(true)
   }
 
   async function updateStatus() {
-    if (!pendingStatusOrder) return
-    const idx = STATUS_FLOW.indexOf(pendingStatusOrder.status)
+    const idx = STATUS_FLOW.indexOf(order.status)
     const nextStatus = STATUS_FLOW[idx + 1]
-    const { error } = await supabase.from('orders').update({ status: nextStatus }).eq('id', pendingStatusOrder.id)
+    const { error } = await supabase.from('orders').update({ status: nextStatus }).eq('id', order.id)
     if (error) alert('更新状态失败')
     else {
       onSuccess()
@@ -453,12 +452,12 @@ export default function OrderManagerModal({
       )}
 
       {/* 推进状态二次确认弹窗 */}
-      {pendingStatusOrder && (() => {
-        const idx = STATUS_FLOW.indexOf(pendingStatusOrder.status)
+      {isConfirmingStatus && (() => {
+        const idx = STATUS_FLOW.indexOf(order.status)
         const nextStatus = STATUS_FLOW[idx + 1]
         return (
           <>
-            <div className="overlay" style={{ zIndex: 110 }} onClick={() => setPendingStatusOrder(null)} />
+            <div className="overlay" style={{ zIndex: 110 }} onClick={() => setIsConfirmingStatus(false)} />
             <div className="dialog" style={{ zIndex: 120 }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{
@@ -476,7 +475,7 @@ export default function OrderManagerModal({
                   <span style={{
                     padding: '4px 12px', borderRadius: '20px',
                     background: '#f5f5f4', fontWeight: '600', color: '#78716c'
-                  }}>{STATUS_LABELS[pendingStatusOrder.status]}</span>
+                  }}>{STATUS_LABELS[order.status]}</span>
                   <ChevronRight size={18} color="#f59e0b" />
                   <span style={{
                     padding: '4px 12px', borderRadius: '20px',
@@ -485,10 +484,10 @@ export default function OrderManagerModal({
                   }}>{STATUS_LABELS[nextStatus]}</span>
                 </div>
                 <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginBottom: '20px' }}>
-                  {pendingStatusOrder.customer_name} · {formatPrice(Number(pendingStatusOrder.total_amount))}
+                  {order.customer_name} · {formatPrice(Number(order.total_amount))}
                 </p>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <button onClick={() => setPendingStatusOrder(null)} className="btn btn-outline" style={{ flex: 1 }}>再想想</button>
+                  <button onClick={() => setIsConfirmingStatus(false)} className="btn btn-outline" style={{ flex: 1 }}>再想想</button>
                   <button onClick={updateStatus} className="btn btn-primary" style={{ flex: 1 }}>确认</button>
                 </div>
               </div>

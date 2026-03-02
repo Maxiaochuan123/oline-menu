@@ -103,7 +103,11 @@ export default function DashboardPage() {
         (payload) => {
           const updated = payload.new as Order
           const old = payload.old as Partial<Order>
+          
           setTodayOrders(prev => prev.map(o => o.id === updated.id ? updated : o))
+          // 实时同步当前打开的详情弹窗
+          setSelectedOrder(prev => prev?.id === updated.id ? updated : prev)
+          
           if (updated.status === 'cancelled' && updated.cancelled_by === 'customer') {
             setTimeout(() => speak(`${lastFourDigits(updated.phone)}取消订单啦！`), 100)
           }
@@ -450,14 +454,16 @@ export default function DashboardPage() {
         </>
       )}
 
-      <OrderManagerModal 
-        order={selectedOrder} 
-        onClose={() => setSelectedOrder(null)} 
-        onSuccess={() => {
-          setSelectedOrder(null)
-          loadData()
-        }}
-      />
+      {selectedOrder && (
+        <OrderManagerModal 
+          order={selectedOrder} 
+          onClose={() => setSelectedOrder(null)} 
+          onSuccess={() => {
+            setSelectedOrder(null)
+            loadData()
+          }}
+        />
+      )}
     </div>
   )
 }
