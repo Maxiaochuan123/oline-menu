@@ -10,7 +10,7 @@ import { formatPrice, speak, lastFourDigits } from '@/lib/utils'
 import {
   Menu, X, LogOut, UtensilsCrossed, ClipboardList, Users,
   ChefHat, TrendingUp, Clock, Copy, Check, Settings, MessageSquare, Tag,
-  AlertTriangle, CheckCircle, ChevronRight, Star
+  Star
 } from 'lucide-react'
 import Link from 'next/link'
 import OrderManagerModal from '../../components/OrderManagerModal'
@@ -22,7 +22,6 @@ const STATUS_LABELS: Record<string, string> = {
   completed: '已完成',
   cancelled: '已取消'
 }
-const STATUS_FLOW = ['pending', 'preparing', 'delivering', 'completed']
 
 export default function DashboardPage() {
   const supabase = createClient()
@@ -36,6 +35,10 @@ export default function DashboardPage() {
 
   // 订单详情状态 (复用外部组件)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  
+  // 订单标记状态
+  const [unreadOrderIds, setUnreadOrderIds] = useState<Set<string>>(new Set())
+  const [negotiatingOrderIds, setNegotiatingOrderIds] = useState<Set<string>>(new Set())
 
   const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -61,14 +64,17 @@ export default function DashboardPage() {
 
     setTodayOrders(orders || [])
 
-    // 未读消息数
-    const { count } = await supabase
+    // 未读消息数与详情
+    const { data: unreadMsgs } = await supabase
       .from('messages')
-      .select('*', { count: 'exact', head: true })
+      .select('order_id, content')
       .eq('merchant_id', merchantData.id)
       .eq('sender', 'customer')
       .eq('is_read_by_merchant', false)
-    setUnreadMsgCount(count || 0)
+    
+    setUnreadMsgCount(unreadMsgs?.length || 0)
+    setUnreadOrderIds(new Set(unreadMsgs?.map(m => m.order_id) || []))
+    setNegotiatingOrderIds(new Set(unreadMsgs?.filter(m => m.content === '客户想和你协商退单').map(m => m.order_id) || []))
 
     setLoading(false)
   }, [supabase, router])
@@ -113,6 +119,11 @@ export default function DashboardPage() {
           }
         }
       )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `merchant_id=eq.${merchant.id}` },
+        () => loadData() // 消息已读状态变更时刷新标记
+      )
       .subscribe()
 
     // 实时订阅新消息
@@ -121,8 +132,13 @@ export default function DashboardPage() {
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `merchant_id=eq.${merchant.id}` },
         (payload) => {
-          if ((payload.new as { sender: string }).sender === 'customer') {
+          const newMsg = payload.new as any
+          if (newMsg.sender === 'customer') {
             setUnreadMsgCount(c => c + 1)
+            setUnreadOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id]))
+            if (newMsg.content === '客户想和你协商退单') {
+              setNegotiatingOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id]))
+            }
             speak('口讯口讯，有新留言啊！')
           }
         }
@@ -361,13 +377,21 @@ export default function DashboardPage() {
                 <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span className={`tag tag-status tag-${order.status}`}>
-                      {
-                        { pending: '待处理', preparing: '制作中', delivering: '配送中', completed: '已完成', cancelled: '已取消' }[order.status]
-                      }
+                      {STATUS_LABELS[order.status] || order.status}
                     </span>
                     {order.after_sales_status === 'pending' && (
                       <span className="tag urgent-tag-pulse">
                         ! 请求售后 {order.after_sales_urge_count > 0 && `(客户已催处理 ${order.after_sales_urge_count} 次)`}
+                      </span>
+                    )}
+                    {negotiatingOrderIds.has(order.id) && (
+                      <span className="tag tag-pulse-red">
+                        退单协商
+                      </span>
+                    )}
+                    {unreadOrderIds.has(order.id) && !negotiatingOrderIds.has(order.id) && (
+                      <span className="tag tag-pulse-blue">
+                        新消息
                       </span>
                     )}
                   </div>

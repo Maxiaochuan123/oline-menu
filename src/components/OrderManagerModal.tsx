@@ -55,16 +55,27 @@ export default function OrderManagerModal({
     }
   }, [order])
 
+  const loadMessages = () => {
+    if (!order) return
+    supabase
+      .from('messages')
+      .select('*')
+      .eq('order_id', order.id)
+      .order('created_at', { ascending: true })
+      .then(async ({ data }) => {
+        setMessages(data || [])
+        // 将客户发的消息标记商家已读
+        const unreadForMerchant = (data || []).filter((m: Message) => m.sender === 'customer' && !m.is_read_by_merchant)
+        if (unreadForMerchant.length > 0) {
+          await supabase.from('messages')
+            .update({ is_read_by_merchant: true })
+            .in('id', unreadForMerchant.map((m: Message) => m.id))
+        }
+      })
+  }
+
   useEffect(() => {
-    if (order && order.after_sales_status !== 'none') {
-      const loadMessages = () => {
-        supabase
-          .from('messages')
-          .select('*')
-          .eq('order_id', order.id)
-          .order('created_at', { ascending: true })
-          .then(({ data }) => setMessages(data || []))
-      }
+    if (order) {
       loadMessages()
 
       const channel = supabase
@@ -74,7 +85,7 @@ export default function OrderManagerModal({
           schema: 'public',
           table: 'messages',
           filter: `order_id=eq.${order.id}`,
-        }, () => loadMessages())
+        }, () => loadMessages()) // Reload on new message and mark as read
         .subscribe()
 
       return () => { supabase.removeChannel(channel) }

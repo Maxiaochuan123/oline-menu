@@ -52,6 +52,11 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
   useEffect(() => {
     if (msgBoxRef.current) {
       msgBoxRef.current.scrollTop = msgBoxRef.current.scrollHeight
+      // 检查聊天区域是否在视口内，如果刚发完消息，确保能看到最新的气泡
+      const rect = msgBoxRef.current.getBoundingClientRect()
+      if (rect.bottom > window.innerHeight) {
+         window.scrollTo({ top: window.scrollY + (rect.bottom - window.innerHeight) + 50, behavior: 'smooth' })
+      }
     }
   }, [messages])
 
@@ -188,6 +193,26 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
     setMsgText('')
     setRating(0)
     setSendingMsg(false)
+  }
+
+  async function handleNegotiateRefund() {
+    if (!order) return
+    setSendingMsg(true)
+    const content = "客户想和你协商退单"
+    await supabase.from('messages').insert({
+      order_id: orderId,
+      merchant_id: merchantId,
+      sender: 'customer',
+      content,
+      is_read_by_merchant: false,
+      is_read_by_customer: true,
+    })
+    setSendingMsg(false)
+    loadMessages()
+    // 滚动到聊天区域，让视口对准对话栏
+    setTimeout(() => {
+      msgBoxRef.current?.closest('.card')?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }, 200)
   }
 
   async function handleCancel() {
@@ -456,9 +481,9 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
               <button 
                 className="btn btn-outline"
                 style={{ flex: 1, color: '#f59e0b', borderColor: '#fcd34d' }}
-                onClick={() => setShowAfterSales(true)}
+                onClick={handleNegotiateRefund}
               >
-                发消息协商
+                与商家协商退单
               </button>
             </div>
           )}
@@ -807,10 +832,9 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
             <span style={{ fontWeight: '700', fontSize: '15px' }}>客服与评价</span>
           </div>
 
-          {/* 消息对话容器，挂载 ref 以便自动滚底 */}
           <div 
             ref={msgBoxRef}
-            style={{ padding: '12px 16px', maxHeight: '400px', overflowY: 'auto', background: '#fafafa' }}
+            style={{ padding: '12px 16px', minHeight: '120px', maxHeight: '420px', overflowY: 'auto', background: '#fafafa' }}
           >
             {messages.length === 0 ? (
               <div style={{ textAlign: 'center', color: '#aaa', fontSize: '13px', padding: '20px 0' }}>

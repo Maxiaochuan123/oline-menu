@@ -84,34 +84,66 @@ body {
 
 /* 脉冲紧急动效 (给大面板用) */
 @keyframes urgentPanelPulse {
-  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
 }
 .urgent-panel-pulse {
   animation: urgentPanelPulse 1.5s infinite ease-in-out;
 }
 
-/* 脉冲紧急动效 (给列表里的小标签用) */
-@keyframes urgentTagPulse {
-  0% { background-color: #fef2f2; color: #ef4444; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  50% { background-color: #ef4444; color: #ffffff; box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); border-color: #ef4444; }
-  100% { background-color: #fef2f2; color: #ef4444; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-}
-.urgent-tag-pulse {
-  animation: urgentTagPulse 1.2s infinite ease-in-out !important;
-  background-color: #fef2f2;
-  color: #ef4444;
-  border: 1px solid #fca5a5;
-  padding: 2px 8px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  gap: 4px;
+/* 统一的脉冲动画：背景、文字、边框颜色及扩散阴影 */
+@keyframes tagPulseRed {
+  0%, 100% { 
+    background-color: #fef2f2; color: #ef4444; border-color: #fca5a5; 
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); 
+  }
+  50% { 
+    background-color: #ef4444; color: #ffffff; border-color: #ef4444; 
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); 
+  }
 }
 
+@keyframes tagPulseBlue {
+  0%, 100% { 
+    background-color: #eff6ff; color: #3b82f6; border-color: #bfdbfe; 
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); 
+  }
+  50% { 
+    background-color: #3b82f6; color: #ffffff; border-color: #3b82f6; 
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0); 
+  }
+}
+
+
+/* 基础标签样式 */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+/* 状态派生类：红闪（紧急/协商） */
+.tag-pulse-red {
+  animation: tagPulseRed 1.5s infinite ease-in-out;
+}
+
+/* 状态派生类：蓝闪（新消息） */
+.tag-pulse-blue {
+  animation: tagPulseBlue 2s infinite ease-in-out;
+}
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out;
 }
@@ -284,8 +316,12 @@ body {
   animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes slideInRight {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 /* 抢券悬浮按钮脉冲动画 */
