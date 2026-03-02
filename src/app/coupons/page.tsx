@@ -25,7 +25,7 @@ export default function CouponsPage() {
   const [newCoupon, setNewCoupon] = useState({
     title: '',
     amount: 5,
-    min_spend: 0,
+    min_spend: 30,
     expiry_days: 7,
     is_global: false,
     target_type: 'all' as 'all' | 'category' | 'customer',
@@ -120,7 +120,7 @@ export default function CouponsPage() {
     if (error) alert(error.message)
     else {
       setShowForm(false)
-      setNewCoupon({ title: '', amount: 5, min_spend: 0, expiry_days: 7, is_global: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: null })
+      setNewCoupon({ title: '', amount: 5, min_spend: 30, expiry_days: 7, is_global: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: null })
       loadData()
     }
   }
@@ -191,7 +191,7 @@ export default function CouponsPage() {
         </div>
         {!viewingCoupon ? (
           <button onClick={() => {
-            setNewCoupon({ title: '', amount: 5, min_spend: 0, expiry_days: 7, is_global: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: null });
+            setNewCoupon({ title: '', amount: 5, min_spend: 30, expiry_days: 7, is_global: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: null });
             setShowForm(true);
           }} className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Plus size={14} /> 创建

@@ -122,7 +122,8 @@ export function calcDiscount(params: {
   let remaining = afterVip
 
   if (couponAmounts && couponAmounts.length > 0) {
-    // 多张券叠加模式
+    // 排序策略：优先应用面值小或者有特定限制的券（此处暂按面值从小到大或业务传入顺序，
+    // 建议调用方在传入前按：定向券 -> 全场底券 顺序排列）
     for (const c of couponAmounts) {
       if (c.amount > 0 && remaining >= c.minSpend) {
         const discount = Math.min(c.amount, remaining)

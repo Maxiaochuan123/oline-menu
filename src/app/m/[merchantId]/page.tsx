@@ -276,11 +276,23 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     })
   }, [availableCoupons, cart])
 
-  // 计算凑单提示 (P5-A 修正为精确门槛)
+  // 计算凑单提示 (优化版：区分全场与定向)
   const couponHint = (() => {
     if (totalCount === 0 || availableCoupons.length === 0) return null
-    // 找出尚未满足条件的券中，差额最小的 (基于该券特定范围下的计算金额)
-    const unreached = availableCoupons.filter(uc => uc.coupon && getCouponEligibleAmount(uc.coupon, cart) < uc.coupon.min_spend)
+    // 找出尚未满足条件的券中，达成后真正能带来更多优惠的
+    const currentNonStackable = selectedCoupons.find(uc => !uc.coupon?.stackable)
+    const currentNonStackableAmount = currentNonStackable?.coupon?.amount ?? 0
+
+    const unreached = availableCoupons.filter(uc => {
+      const coupon = uc.coupon
+      if (!coupon) return false
+      // 1. 金额未达标
+      if (getCouponEligibleAmount(coupon, cart) >= coupon.min_spend) return false
+      // 2. 必须是：能叠加的券 OR 比当前非叠加券更优的券
+      const isStackable = coupon.stackable
+      const isBetterThanCurrent = coupon.amount > currentNonStackableAmount
+      return isStackable || isBetterThanCurrent
+    })
     if (unreached.length > 0) {
       unreached.sort((a, b) => {
         const diffA = (a.coupon?.min_spend ?? 0) - getCouponEligibleAmount(a.coupon!, cart)
@@ -288,15 +300,22 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         return diffA - diffB
       })
       const target = unreached[0]
-      const eligibleAmount = getCouponEligibleAmount(target.coupon!, cart)
-      const diff = (target.coupon?.min_spend ?? 0) - eligibleAmount
+      const coupon = target.coupon!
+      const eligibleAmount = getCouponEligibleAmount(coupon, cart)
+      const diff = coupon.min_spend - eligibleAmount
+      const isTargeted = coupon.target_type && coupon.target_type !== 'all'
       
       // 如果是一分钱都没达标(没点该分类)的定向券
-      if (eligibleAmount === 0 && target.coupon?.target_type && target.coupon.target_type !== 'all') {
-         // 我们可以在列表详细提示，顶部横幅先提示金额差或者略过
-         return null // 交由列表提示，或显示：{ type: '差额', text: `您还未添加【${target.coupon?.title}】指定商品` }
+      if (eligibleAmount === 0 && isTargeted) {
+         return { type: '差额', text: `再买 ¥${diff.toFixed(0)}【${coupon.title}】指定商品可用` }
       }
-      return { type: '差额', text: `还差 ¥${diff.toFixed(2)} 即可使用【${target.coupon?.title}】` }
+      
+      // 如果总额已经够了，但是指定商品不够（定向券）
+      if (totalAmount >= coupon.min_spend && isTargeted) {
+         return { type: '差额', text: `【${coupon.title}】需指定商品满 ¥${coupon.min_spend}，还差 ¥${diff.toFixed(1)}` }
+      }
+
+      return { type: '差额', text: `还差 ¥${diff.toFixed(2)} 即可使用【${coupon.title}】` }
     }
     // 全都满足了
     if (selectedCoupons.length > 0) {
@@ -306,11 +325,20 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     return null
   })()
 
-  // 折扣计算
+  // 折扣计算 (优化：按门槛和定向属性排序，优先应用底券/全场券？不，通常建议定向优先)
+  // 此处定义最优计算顺序：将可叠加券（通常是定向/特定商品）放在前面，全场底券放在最后
+  const sortedSelectedCoupons = [...selectedCoupons].sort((a, b) => {
+    // 可叠加的（定向）优先于非叠加的（底）
+    if (a.coupon?.stackable && !b.coupon?.stackable) return -1
+    if (!a.coupon?.stackable && b.coupon?.stackable) return 1
+    // 门槛高的优先 (或者面额大的优先，这里可以根据业务定，通常门槛高的优先能腾出门槛低的空间)
+    return (b.coupon?.min_spend ?? 0) - (a.coupon?.min_spend ?? 0)
+  })
+
   const discountResult = calcDiscount({
     originalAmount: totalAmount,
     points: customerPoints,
-    couponAmounts: selectedCoupons.map(uc => ({
+    couponAmounts: sortedSelectedCoupons.map(uc => ({
       amount: uc.coupon?.amount ?? 0,
       minSpend: uc.coupon?.min_spend ?? 0,
     })),
@@ -396,7 +424,8 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           vip_discount_rate: discountResult.vipLevel.rate,
           vip_discount_amount: discountResult.vipDiscountAmount,
           coupon_discount_amount: discountResult.couponDiscountAmount,
-          coupon_id: selectedCoupons[0]?.coupon_id ?? null,
+          coupon_id: sortedSelectedCoupons.find(c => !c.coupon?.stackable)?.coupon_id ?? sortedSelectedCoupons[0]?.coupon_id ?? null,
+          coupon_ids: sortedSelectedCoupons.map(c => c.coupon_id),
           status: 'pending',
         })
         .select('id')
@@ -1158,7 +1187,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                           </div>
                           <div style={{ fontSize: '11px', color: '#f97316', opacity: 0.8, marginTop: '4px' }}>
                             有效期 {c.expiry_days} 天
-                            {c.total_quantity !== null && ` · 限量 ${c.total_quantity} 张 (已领 ${c.claimed_count})`}
+                            {c.total_quantity !== null && ` · 总量 ${c.total_quantity} 张 · 剩余 ${c.total_quantity - (c.claimed_count || 0)} 张`}
                           </div>
                         </div>
                         <button
@@ -1266,90 +1295,129 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       {showCouponPicker && (
         <>
           <div className="overlay" style={{ zIndex: 200 }} onClick={() => setShowCouponPicker(false)} />
-          <div className="dialog" style={{ zIndex: 210, position: 'fixed', bottom: 0, top: 'auto', left: 0, right: 0, transform: 'none', width: '100%', maxWidth: 'none', borderRadius: '20px 20px 0 0', padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div className="dialog" style={{ 
+            zIndex: 210, position: 'fixed', bottom: 0, top: 'auto', 
+            left: 0, right: 0, transform: 'none', width: '100%', 
+            maxWidth: 'none', borderRadius: '20px 20px 0 0', padding: '20px',
+            maxHeight: '85vh', display: 'flex', flexDirection: 'column' 
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
               <h3 style={{ fontWeight: '800' }}>选择优惠券</h3>
               <button onClick={() => setShowCouponPicker(false)} style={{ background: 'none', border: 'none' }}><X size={20} /></button>
             </div>
-            <div
-              onClick={() => { setSelectedCoupons([]); setShowCouponPicker(false) }}
-              style={{
-                padding: '14px', borderRadius: '12px', marginBottom: '10px', cursor: 'pointer',
-                border: selectedCoupons.length === 0 ? '2px solid #f97316' : '1px solid #eee',
-                background: selectedCoupons.length === 0 ? '#fff7ed' : 'white',
-              }}
-            >
-              <div style={{ fontWeight: '600' }}>不使用优惠券</div>
-            </div>
-            {availableCoupons.map(uc => {
-              const minSpend = uc.coupon?.min_spend ?? 0
-              const eligibleAmount = uc.coupon ? getCouponEligibleAmount(uc.coupon, cart) : totalAmount
-              const disabled = eligibleAmount < minSpend
-              const gap = minSpend - eligibleAmount
-              const isSelected = selectedCoupons.some(c => c.id === uc.id)
-              
-              const renderDisableReason = () => {
-                if (eligibleAmount === 0 && uc.coupon?.target_type && uc.coupon.target_type !== 'all') {
-                  return '您还未添加该商品'
-                }
-                if (minSpend > 0 && disabled) {
-                  return `还差 ¥${gap.toFixed(0)}，满 ¥${minSpend} 可用`
-                }
-                return `满 ¥${minSpend} 可用`
-              }
 
-              return (
-              <div key={uc.id}
-                onClick={() => {
-                  if (disabled) {
-                    if (eligibleAmount === 0 && uc.coupon?.target_type && uc.coupon.target_type !== 'all') {
-                      alert(`您还未添加该指定商品，无法使用此券哦`)
-                    } else {
-                      alert(`还差 ¥${gap.toFixed(0)} 即可使用此券（满 ¥${minSpend} 可用）`)
-                    }
-                    return
-                  }
-                  if (isSelected) {
-                    setSelectedCoupons(selectedCoupons.filter(c => c.id !== uc.id))
-                  } else {
-                    // 非叠加券替换已有非叠加券; 叠加券追加
-                    if (uc.coupon?.stackable) {
-                      setSelectedCoupons([...selectedCoupons, uc])
-                    } else {
-                      setSelectedCoupons([uc, ...selectedCoupons.filter(c => c.coupon?.stackable)])
-                    }
-                  }
-                }}
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: selectedCoupons.length > 0 ? '16px' : 0 }}>
+              <div
+                onClick={() => { setSelectedCoupons([]); setShowCouponPicker(false) }}
                 style={{
-                  padding: '14px', borderRadius: '12px', marginBottom: '10px',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  border: isSelected ? '2px solid #f97316' : '1px solid #eee',
-                  background: disabled ? '#f5f5f4' : isSelected ? '#fff7ed' : 'white',
-                  opacity: disabled ? 0.6 : 1,
-                  filter: disabled ? 'grayscale(80%)' : 'none'
+                  padding: '14px', borderRadius: '12px', marginBottom: '10px', cursor: 'pointer',
+                  border: selectedCoupons.length === 0 ? '2px solid #f97316' : '1px solid #eee',
+                  background: selectedCoupons.length === 0 ? '#fff7ed' : 'white',
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontWeight: '700', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {uc.coupon?.title}
-                      {uc.coupon?.stackable && <span style={{ fontSize: '10px', background: '#ede9fe', color: '#7c3aed', padding: '1px 5px', borderRadius: '4px' }}>可叠加</span>}
-                    </div>
-                    <div style={{ fontSize: '12px', color: disabled ? '#ef4444' : '#aaa', marginTop: '4px', fontWeight: disabled ? '600' : 'normal' }}>
-                      {minSpend > 0 ? renderDisableReason() : '无门槛'} · {new Date(uc.expires_at).toLocaleDateString()} 到期
+                <div style={{ fontWeight: '600' }}>不使用优惠券</div>
+              </div>
+              {(() => {
+                const currentNonStackable = selectedCoupons.find(uc => !uc.coupon?.stackable)
+                const currentNonStackableAmount = currentNonStackable?.coupon?.amount ?? 0
+                
+                return availableCoupons.map(uc => {
+                  const minSpend = uc.coupon?.min_spend ?? 0
+                  const eligibleAmount = uc.coupon ? getCouponEligibleAmount(uc.coupon, cart) : totalAmount
+                  const disabled = eligibleAmount < minSpend
+                  const gap = minSpend - eligibleAmount
+                  const isSelected = selectedCoupons.some(c => c.id === uc.id)
+                  const isStackable = uc.coupon?.stackable ?? false
+                  const isBetterOrStackable = isStackable || (uc.coupon?.amount ?? 0) > currentNonStackableAmount
+                  
+                  const renderDisableReason = () => {
+                    const coupon = uc.coupon
+                    if (!coupon) return ''
+                    const isTargeted = coupon.target_type && coupon.target_type !== 'all'
+                    
+                    // 计算该券如果达成，是否真的能省更多钱
+                    if (eligibleAmount === 0 && isTargeted) {
+                      return '未添加指定商品'
+                    }
+                    if (disabled) {
+                      // 如果收益不增加，就不要用“还差￥XX”来诱导凑单了，只显示门槛即可
+                      if (!isBetterOrStackable && currentNonStackableAmount > 0) {
+                        return `满 ¥${minSpend} 可用 (不可叠加)`
+                      }
+
+                      if (totalAmount >= minSpend && isTargeted) {
+                        return `指定商品还差 ¥${gap.toFixed(0)}（满 ¥${minSpend} 可用）`
+                      }
+                      return `还差 ¥${gap.toFixed(0)}，满 ¥${minSpend} 可用`
+                    }
+                    return `满 ¥${minSpend} 可用`
+                  }
+
+                  return (
+                  <div key={uc.id}
+                    onClick={() => {
+                      if (disabled) {
+                        const isTargeted = uc.coupon?.target_type && uc.coupon.target_type !== 'all'
+                        
+                        // 如果即便凑够了也没法多省钱
+                        if (!isBetterOrStackable && currentNonStackableAmount > 0) {
+                          alert(`【${uc.coupon?.title}】不可与当前已选优惠券叠加使用，即便凑满门槛，优惠总额也不会增加哦。`)
+                          return
+                        }
+
+                        if (eligibleAmount === 0 && isTargeted) {
+                          alert(`您还未添加【${uc.coupon?.title}】指定的商品，无法使用此券`)
+                        } else if (totalAmount >= minSpend && isTargeted) {
+                          alert(`【${uc.coupon?.title}】仅限指定商品参加，目前指定商品还差 ¥${gap.toFixed(0)}（需满 ¥${minSpend}）`)
+                        } else {
+                          alert(`目前还差 ¥${gap.toFixed(0)} 即可使用此券（满 ¥${minSpend} 可用）`)
+                        }
+                        return
+                      }
+                      if (isSelected) {
+                        setSelectedCoupons(selectedCoupons.filter(c => c.id !== uc.id))
+                      } else {
+                        // 非叠加券替换已有非叠加券; 叠加券追加
+                        if (uc.coupon?.stackable) {
+                          setSelectedCoupons([...selectedCoupons, uc])
+                        } else {
+                          setSelectedCoupons([uc, ...selectedCoupons.filter(c => c.coupon?.stackable)])
+                        }
+                      }
+                    }}
+                    style={{
+                      padding: '14px', borderRadius: '12px', marginBottom: '10px',
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      border: isSelected ? '2px solid #f97316' : '1px solid #eee',
+                      background: disabled ? '#f5f5f4' : isSelected ? '#fff7ed' : 'white',
+                      opacity: disabled ? 0.6 : 1,
+                      filter: disabled ? 'grayscale(80%)' : 'none'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: '700', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {uc.coupon?.title}
+                          {uc.coupon?.stackable && <span style={{ fontSize: '10px', background: '#ede9fe', color: '#7c3aed', padding: '1px 5px', borderRadius: '4px' }}>可叠加</span>}
+                        </div>
+                        <div style={{ fontSize: '12px', color: disabled ? '#ef4444' : '#aaa', marginTop: '4px', fontWeight: disabled ? '600' : 'normal' }}>
+                          {minSpend > 0 ? renderDisableReason() : '无门槛'} · {new Date(uc.expires_at).toLocaleDateString()} 到期
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '22px', fontWeight: '800', color: disabled ? '#ccc' : '#f97316' }}>-￥{uc.coupon?.amount?.toFixed(0)}</div>
                     </div>
                   </div>
-                  <div style={{ fontSize: '22px', fontWeight: '800', color: disabled ? '#ccc' : '#f97316' }}>-￥{uc.coupon?.amount?.toFixed(0)}</div>
-                </div>
-              </div>
-              )
-            })}
+                  )
+                })
+              })()}
+            </div>
             {selectedCoupons.length > 0 && (
-              <button
-                onClick={() => setShowCouponPicker(false)}
-                className="btn btn-primary btn-block"
-                style={{ marginTop: '8px' }}
-              >确定（已选 {selectedCoupons.length} 张，省 ¥{selectedCoupons.reduce((s, c) => s + (c.coupon?.amount ?? 0), 0).toFixed(0)}）</button>
+              <div style={{ flexShrink: 0 }}>
+                <button
+                  onClick={() => setShowCouponPicker(false)}
+                  className="btn btn-primary btn-block"
+                >确定（已选 {selectedCoupons.length} 张，省 ¥{selectedCoupons.reduce((s, c) => s + (c.coupon?.amount ?? 0), 0).toFixed(0)}）</button>
+              </div>
             )}
           </div>
         </>
