@@ -209,16 +209,31 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
   async function handleNegotiateRefund() {
     if (!order) return
     setSendingMsg(true)
-    const content = "客户想和你协商退单"
+    const content = "【协商退单】客户由于配送中等原因申请取消订单，请及时处理"
+    
+    // 同步更新订单状态，使商家端弹出“去处理”面板
+    const { error: orderError } = await supabase.from('orders').update({
+      after_sales_status: 'pending',
+      after_sales_reason: '客户在配送中申请协商退单',
+      after_sales_urge_count: 0,
+      after_sales_last_urge_at: new Date().toISOString()
+    }).eq('id', orderId)
+
+    if (orderError) {
+      console.error('Update order after_sales_status error:', orderError)
+    }
+
     await supabase.from('messages').insert({
       order_id: orderId,
       merchant_id: merchantId,
       sender: 'customer',
       content,
+      msg_type: 'after_sales',
       is_read_by_merchant: false,
       is_read_by_customer: true,
     })
     setSendingMsg(false)
+    loadData() // 刷新订单状态
     loadMessages()
     // 滚动到聊天区域，让视口对准对话栏
     setTimeout(() => {
@@ -419,6 +434,17 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
         background: status.color, color: 'white', padding: '40px 24px 80px',
         textAlign: 'center', transition: 'background 0.3s'
       }}>
+        <div style={{ position: 'absolute', top: '16px', left: '16px' }}>
+          <Link href={`/m/${merchantId}/orders`} style={{ textDecoration: 'none' }}>
+            <div style={{ 
+              width: '36px', height: '36px', borderRadius: '50%', 
+              background: 'rgba(255,255,255,0.2)', display: 'flex', 
+              alignItems: 'center', justifyContent: 'center', color: 'white' 
+            }}>
+              <ArrowLeft size={20} />
+            </div>
+          </Link>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '8px' }}>
           {order.status === 'completed' ? <CheckCircle2 size={32} /> : <Clock size={32} />}
           <h1 style={{ fontSize: '24px', fontWeight: '800' }}>{status.label}</h1>
@@ -592,11 +618,11 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
         </div>
       </div>
 
-      <div style={{ position: 'fixed', bottom: '20px', left: '20px', right: '20px', display: 'flex', gap: '10px' }}>
-        {order.status === 'cancelled' && (
+      {order.status === 'cancelled' && (
+        <div style={{ position: 'fixed', bottom: '20px', left: '20px', right: '20px' }}>
           <button
             className="btn btn-primary"
-            style={{ flex: 1, height: '44px', borderRadius: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+            style={{ width: '100%', height: '44px', borderRadius: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
             onClick={() => {
               // 将原订单菜品写入 localStorage 购物车
               const cartItems = items.map(item => ({
@@ -609,13 +635,8 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
           >
             <RefreshCw size={16} /> 重新下单
           </button>
-        )}
-        <Link href={`/m/${merchantId}`} style={{ flex: order.status === 'cancelled' ? 1 : 'auto', width: order.status === 'cancelled' ? 'auto' : '100%' }}>
-          <button className="btn btn-outline btn-block" style={{ background: 'white', height: '44px', borderRadius: '22px' }}>
-            <ArrowLeft size={16} /> 返回菜单
-          </button>
-        </Link>
-      </div>
+        </div>
+      )}
 
       {/* 收款码弹窗 */}
       {showPayQr && (

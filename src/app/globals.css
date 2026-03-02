@@ -135,14 +135,15 @@ body {
   transition: all 0.3s ease;
 }
 
-/* 状态派生类：红闪（紧急/协商） */
+/* 状态派生类：红闪（紧急/协商） - 增强对比度 */
 .tag-pulse-red {
-  animation: tagPulseRed 1.5s infinite ease-in-out;
+  animation: tagPulseRed 1.2s infinite ease-in-out;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
 }
 
 /* 状态派生类：蓝闪（新消息） */
 .tag-pulse-blue {
-  animation: tagPulseBlue 2s infinite ease-in-out;
+  animation: tagPulseBlue 1.8s infinite ease-in-out;
 }
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out;
@@ -230,14 +231,17 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
-/* 标签 */
+/* 标签系统 - 统一收口 */
 .tag {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .tag-new {
   background: #fef3c7;

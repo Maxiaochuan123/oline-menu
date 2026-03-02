@@ -67,14 +67,17 @@ export default function DashboardPage() {
     // 未读消息数与详情
     const { data: unreadMsgs } = await supabase
       .from('messages')
-      .select('order_id, content')
+      .select('order_id, content, msg_type')
       .eq('merchant_id', merchantData.id)
       .eq('sender', 'customer')
       .eq('is_read_by_merchant', false)
     
     setUnreadMsgCount(unreadMsgs?.length || 0)
     setUnreadOrderIds(new Set(unreadMsgs?.map(m => m.order_id) || []))
-    setNegotiatingOrderIds(new Set(unreadMsgs?.filter(m => m.content === '客户想和你协商退单').map(m => m.order_id) || []))
+    setNegotiatingOrderIds(new Set(
+      unreadMsgs?.filter(m => m.msg_type === 'after_sales' || m.content.startsWith('【协商退单】') || m.content === '客户想和你协商退单')
+        .map(m => m.order_id) || []
+    ))
 
     setLoading(false)
   }, [supabase, router])
@@ -140,7 +143,7 @@ export default function DashboardPage() {
           if (newMsg.sender === 'customer') {
             setUnreadMsgCount(c => c + 1)
             setUnreadOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id]))
-            if (newMsg.content === '客户想和你协商退单') {
+            if (newMsg.msg_type === 'after_sales' || newMsg.content.includes('协商退单')) {
               setNegotiatingOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id]))
             }
             speak('口讯口讯，有新留言啊！')
@@ -383,12 +386,12 @@ export default function DashboardPage() {
                     <span className={`tag tag-status tag-${order.status}`}>
                       {STATUS_LABELS[order.status] || order.status}
                     </span>
-                    {order.after_sales_status === 'pending' && (
-                      <span className="tag urgent-tag-pulse">
-                        ! 请求售后 {order.after_sales_urge_count > 0 && `(客户已催处理 ${order.after_sales_urge_count} 次)`}
+                    {order.after_sales_status === 'pending' ? (
+                      <span className="tag tag-pulse-red">
+                        {['completed', 'cancelled'].includes(order.status) ? '! 请求售后' : '! 退单协商'}
+                        {order.after_sales_urge_count > 0 && ` (催 ${order.after_sales_urge_count})`}
                       </span>
-                    )}
-                    {negotiatingOrderIds.has(order.id) && (
+                    ) : negotiatingOrderIds.has(order.id) && (
                       <span className="tag tag-pulse-red">
                         退单协商
                       </span>

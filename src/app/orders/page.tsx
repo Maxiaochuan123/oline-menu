@@ -146,8 +146,9 @@ export default function OrdersPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
                       {order.after_sales_status === 'pending' && (
-                        <span className="tag urgent-tag-pulse">
-                          ! 请求售后 {order.after_sales_urge_count > 0 && `(客户已催处理 ${order.after_sales_urge_count} 次)`}
+                        <span className="tag tag-status tag-pulse-red">
+                          {['completed', 'cancelled'].includes(order.status) ? '! 请求售后' : '! 退单协商'}
+                          {order.after_sales_urge_count > 0 && ` (催 ${order.after_sales_urge_count})`}
                         </span>
                       )}
                     </div>
@@ -201,18 +202,22 @@ export default function OrdersPage() {
                     <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginLeft: '8px' }}>{formatPrice(Number(order.total_amount))}</span>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
-                    
-                    {order.after_sales_status === 'resolved' && (
-                       <div style={{ marginTop: '6px', color: '#15803d', fontSize: '11px', fontWeight: '700', background: '#f0fdf4', padding: '4px 8px', borderRadius: '4px', display: 'inline-block', border: '1px solid #bbf7d0' }}>
-                         已售后: 退 {formatPrice(Number(order.refund_amount))}
-                       </div>
-                    )}
-                    {order.after_sales_status === 'rejected' && (
-                       <div style={{ marginTop: '6px', color: '#666', fontSize: '11px', fontWeight: '700', background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', display: 'inline-block', border: '1px solid #e5e7eb' }}>
-                         已售后: 驳回
-                       </div>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                      <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
+                      {order.after_sales_status === 'pending' && (
+                        <span className="tag tag-status tag-pulse-red">! 请求售后</span>
+                      )}
+                      {order.after_sales_status === 'resolved' && (
+                         <span className="tag tag-status" style={{ color: '#2563eb', background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                           已售后: 退 {formatPrice(Number(order.refund_amount))}
+                         </span>
+                      )}
+                      {order.after_sales_status === 'rejected' && (
+                         <span className="tag tag-status" style={{ color: '#4b5563', background: '#f3f4f6', border: '1px solid #e5e7eb' }}>
+                           已售后: 驳回
+                         </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
