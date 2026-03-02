@@ -42,6 +42,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
 
   // 消息动态滚动与条件判定
   const msgBoxRef = React.useRef<HTMLDivElement>(null)
+  const isInitialLoad = React.useRef(true) // 追踪是否为初次加载页面
   
   // 仅在“订单已完成”状态，或时间线上出现过商家发送的“after_sales_closed”完结语后，释放展示打分板
   const shouldShowRatingPanel = !!order && (
@@ -51,8 +52,18 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
   
   useEffect(() => {
     if (msgBoxRef.current) {
+      // 内部滚动始终到底部，以便看到最新消息
       msgBoxRef.current.scrollTop = msgBoxRef.current.scrollHeight
-      // 检查聊天区域是否在视口内，如果刚发完消息，确保能看到最新的气泡
+      
+      // 如果是初次进入页面（初始化加载数据），绝对不要触发布屏视口滚动
+      if (isInitialLoad.current) {
+        if (messages.length > 0) {
+          isInitialLoad.current = false // 拿到第一波历史消息后，标记初始化结束
+        }
+        return
+      }
+
+      // 如果不是初次加载（比如刚发完消息，或实时收到了新消息），则确保视口对准聊天区
       const rect = msgBoxRef.current.getBoundingClientRect()
       if (rect.bottom > window.innerHeight) {
          window.scrollTo({ top: window.scrollY + (rect.bottom - window.innerHeight) + 50, behavior: 'smooth' })
