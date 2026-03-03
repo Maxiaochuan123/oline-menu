@@ -109,7 +109,8 @@ export function calcDiscount(params: {
 } {
   const { originalAmount, points, couponAmount = 0, couponMinSpend = 0, couponAmounts } = params
 
-  // 有效积分 = 历史积分 + 本单金额（消费即享，本单消费即算入等级）
+  // 先计算 VIP 折扣
+  // 注：预积分用「原价」做临时预测（客户尚未付款，不知道最终实付），下单后按实付入库
   const effectivePoints = points + Math.floor(originalAmount)
   const vipLevel = getVipLevel(effectivePoints)
 
@@ -122,8 +123,6 @@ export function calcDiscount(params: {
   let remaining = afterVip
 
   if (couponAmounts && couponAmounts.length > 0) {
-    // 排序策略：优先应用面值小或者有特定限制的券（此处暂按面值从小到大或业务传入顺序，
-    // 建议调用方在传入前按：定向券 -> 全场底券 顺序排列）
     for (const c of couponAmounts) {
       if (c.amount > 0 && remaining >= c.minSpend) {
         const discount = Math.min(c.amount, remaining)

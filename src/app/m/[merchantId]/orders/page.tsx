@@ -22,7 +22,7 @@ export default function CustomerOrdersPage({ params }: { params: Promise<{ merch
   const router = useRouter()
 
   const [orders, setOrders] = useState<any[]>([])
-  const [merchant, setMerchant] = useState<Merchant | null>(null)
+  const [merchant, setMerchant] = useState<Partial<Merchant> | null>(null)
   const [loading, setLoading] = useState(true)
   const [customerInfo, setCustomerInfo] = useState<{name: string, phone: string} | null>(null)
 

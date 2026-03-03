@@ -5,16 +5,14 @@ export const dynamic = 'force-dynamic'
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import type { Merchant, Order, OrderItem } from '@/lib/types'
-import { formatPrice, getCountdown, speak, lastFourDigits } from '@/lib/utils'
-import { ArrowLeft, Clock, ChevronRight, HelpCircle } from 'lucide-react'
+import type { Merchant, Order } from '@/lib/types'
+import { lastFourDigits } from '@/lib/utils'
+import { ArrowLeft, Clock } from 'lucide-react'
 import Link from 'next/link'
 import OrderManagerModal from '@/components/OrderManagerModal'
+import OrderCard from '@/components/OrderCard'
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: '待处理', preparing: '制作中', delivering: '配送中', completed: '已完成', cancelled: '已取消'
-}
-const STATUS_FLOW = ['pending', 'preparing', 'delivering', 'completed']
+
 
 export default function OrdersPage() {
   const supabase = createClient()
@@ -24,6 +22,16 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [, setTick] = useState(0)
+
+  // 补回缺漏的语音提示方法
+  const speak = useCallback((text: string) => {
+    if ('speechSynthesis' in window) {
+      const msg = new SpeechSynthesisUtterance(text)
+      msg.lang = 'zh-CN'
+      msg.rate = 1.1
+      window.speechSynthesis.speak(msg)
+    }
+  }, [])
 
   const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -80,7 +88,7 @@ export default function OrdersPage() {
         }
       ).subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [merchant, supabase])
+  }, [merchant, supabase, speak])
 
   async function openOrder(order: Order) {
     setSelectedOrder(order)
@@ -128,64 +136,15 @@ export default function OrdersPage() {
         {activeOrders.length > 0 && (
           <>
             <h3 style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-secondary)', marginBottom: '10px' }}>进行中</h3>
-            {activeOrders.map(order => (
-              <div key={order.id} className="card animate-fade-in" style={{ marginBottom: '10px', cursor: 'pointer' }} onClick={() => openOrder(order)}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '4px' }}>
-                      <span className={`tag tag-${order.order_type === 'personal' ? 'personal' : 'company'}`}>
-                        {order.order_type === 'personal' ? '个人' : '公司'}
-                      </span>
-                      <span style={{ fontWeight: '600' }}>{order.customer_name}</span>
-                    </div>
-                    <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-                      {order.phone} · {formatPrice(Number(order.total_amount))}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
-                      {order.after_sales_status === 'pending' && (
-                        <span className="tag tag-status tag-pulse-red">
-                          {['completed', 'cancelled'].includes(order.status) ? '! 请求售后' : '! 退单协商'}
-                          {order.after_sales_urge_count > 0 && ` (催 ${order.after_sales_urge_count})`}
-                        </span>
-                      )}
-                    </div>
-                    {order.after_sales_status === 'resolved' && (
-                       <div style={{ color: '#15803d', fontSize: '11px', fontWeight: '700', background: '#f0fdf4', padding: '4px 8px', borderRadius: '4px', display: 'inline-block', border: '1px solid #bbf7d0' }}>
-                         已售后: 退 {formatPrice(Number(order.refund_amount))}
-                       </div>
-                    )}
-                    {order.after_sales_status === 'rejected' && (
-                       <div style={{ color: '#666', fontSize: '11px', fontWeight: '700', background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', display: 'inline-block', border: '1px solid #e5e7eb' }}>
-                         已售后: 驳回
-                       </div>
-                    )}
-
-                    <div style={{ fontSize: '12px', color: '#f97316', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
-                      <Clock size={12} /> {getCountdown(order.scheduled_time)}
-                    </div>
-                  </div>
-                </div>
-                {/* 进度条 */}
-                <div className="progress-bar">
-                  {STATUS_FLOW.map((s, i) => (
-                    <div key={s} className={`progress-step ${STATUS_FLOW.indexOf(order.status) >= i ? 'completed' : ''} ${order.status === s ? 'active' : ''}`} />
-                  ))}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
-                  {order.status !== 'completed' && order.status !== 'cancelled' && order.after_sales_status !== 'pending' && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); requestStatusUpdate(order) }}
-                      className="btn btn-primary btn-sm"
-                    >
-                      {STATUS_LABELS[STATUS_FLOW[STATUS_FLOW.indexOf(order.status) + 1]] || ''}
-                      <ChevronRight size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
+                {activeOrders.map(order => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                isUrgent={order.after_sales_status === 'pending'}
+                showProgress={true}
+                onClick={openOrder}
+                onStatusUpdate={requestStatusUpdate}
+              />
             ))}
           </>
         )}
@@ -195,32 +154,12 @@ export default function OrdersPage() {
           <>
             <h3 style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-secondary)', margin: '20px 0 10px' }}>历史订单</h3>
             {historyOrders.slice(0, 20).map(order => (
-              <div key={order.id} className="card" style={{ marginBottom: '8px', cursor: 'pointer', opacity: 0.7 }} onClick={() => openOrder(order)}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ fontWeight: '600' }}>{order.customer_name}</span>
-                    <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginLeft: '8px' }}>{formatPrice(Number(order.total_amount))}</span>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                      <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
-                      {order.after_sales_status === 'pending' && (
-                        <span className="tag tag-status tag-pulse-red">! 请求售后</span>
-                      )}
-                      {order.after_sales_status === 'resolved' && (
-                         <span className="tag tag-status" style={{ color: '#2563eb', background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-                           已售后: 退 {formatPrice(Number(order.refund_amount))}
-                         </span>
-                      )}
-                      {order.after_sales_status === 'rejected' && (
-                         <span className="tag tag-status" style={{ color: '#4b5563', background: '#f3f4f6', border: '1px solid #e5e7eb' }}>
-                           已售后: 驳回
-                         </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <OrderCard
+                key={order.id}
+                order={order}
+                opacity={0.65}
+                onClick={openOrder}
+              />
             ))}
           </>
         )}

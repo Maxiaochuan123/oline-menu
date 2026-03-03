@@ -62,6 +62,8 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const [showCouponCenter, setShowCouponCenter] = useState(false)
   const [couponCenterTab, setCouponCenterTab] = useState<'claim' | 'unused' | 'used' | 'invalid'>('claim')
   const [claimLoading, setClaimLoading] = useState<string | null>(null)
+  // 是否由用户手动切换过优惠券（手动选过后不再自动覆盖）
+  const [couponManuallySet, setCouponManuallySet] = useState(false)
 
   const itemsRef = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -260,21 +262,19 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const totalAmount = cart.reduce((sum, item) => sum + item.menuItem.price * item.quantity, 0)
   const totalCount = cart.reduce((sum, item) => sum + item.quantity, 0)
 
-  // 自动选择最优优惠券（最优非叠加券 + 所有可叠加券），只选择实际符合可用金额门槛的券
+  // 自动选择最优优惠券（最优非叠加券 + 所有可叠加券）
   useEffect(() => {
     if (availableCoupons.length === 0) return
+    // 用户手动选过则不自动覆盖
+    if (couponManuallySet) return
     const eligible = availableCoupons.filter(uc => uc.coupon && getCouponEligibleAmount(uc.coupon, cart) >= uc.coupon.min_spend)
     const nonStackable = eligible.filter(uc => !uc.coupon?.stackable).sort((a, b) => (b.coupon?.amount ?? 0) - (a.coupon?.amount ?? 0))
     const stackable = eligible.filter(uc => uc.coupon?.stackable)
     const best: UserCoupon[] = []
     if (nonStackable[0]) best.push(nonStackable[0])
     best.push(...stackable)
-    setSelectedCoupons(prev => {
-      // 有手动选择过且仍有效时不覆盖
-      if (prev.length > 0 && prev.every(p => p.coupon && getCouponEligibleAmount(p.coupon, cart) >= p.coupon.min_spend)) return prev
-      return best
-    })
-  }, [availableCoupons, cart])
+    setSelectedCoupons(best)
+  }, [availableCoupons, cart, couponManuallySet])
 
   // 计算凑单提示 (优化版：区分全场与定向)
   const couponHint = (() => {
@@ -456,6 +456,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       setShowOrderForm(false)
       setCart([])
       setSelectedCoupons([])
+      setCouponManuallySet(false) // 下单后重置，下次重新自动选最优
       localStorage.removeItem(`cart_${merchantId}`)
       localStorage.setItem(`last_order_${merchantId}`, order.id)
       router.push(`/m/${merchantId}/order/${order.id}`)
@@ -1101,7 +1102,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             </div>
             <div style={{ fontSize: '13px', color: '#666', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '4px' }}>
               当前积分：<span style={{ fontWeight: '700', color: '#1c1917' }}>⭐ {customerPoints} </span>
-              {totalAmount > 0 && <span style={{ color: '#f97316', fontSize: '12px' }}>(+{Math.floor(totalAmount)} 预得)</span>}
+              {totalAmount > 0 && <span style={{ color: '#f97316', fontSize: '12px' }}>(+{Math.floor(finalAmount)} 预得)</span>}
             </div>
             {VIP_LEVELS.slice(1).map(lv => {
               const potentialPoints = customerPoints + Math.floor(totalAmount)
@@ -1308,7 +1309,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: selectedCoupons.length > 0 ? '16px' : 0 }}>
               <div
-                onClick={() => { setSelectedCoupons([]); setShowCouponPicker(false) }}
+                onClick={() => { setSelectedCoupons([]); setCouponManuallySet(true); setShowCouponPicker(false) }}
                 style={{
                   padding: '14px', borderRadius: '12px', marginBottom: '10px', cursor: 'pointer',
                   border: selectedCoupons.length === 0 ? '2px solid #f97316' : '1px solid #eee',
@@ -1376,6 +1377,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                       }
                       if (isSelected) {
                         setSelectedCoupons(selectedCoupons.filter(c => c.id !== uc.id))
+                        setCouponManuallySet(true)
                       } else {
                         // 非叠加券替换已有非叠加券; 叠加券追加
                         if (uc.coupon?.stackable) {
@@ -1383,6 +1385,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                         } else {
                           setSelectedCoupons([uc, ...selectedCoupons.filter(c => c.coupon?.stackable)])
                         }
+                        setCouponManuallySet(true)
                       }
                     }}
                     style={{

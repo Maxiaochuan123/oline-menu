@@ -77,7 +77,9 @@ export interface Order {
   vip_discount_amount: number
   coupon_discount_amount: number
   coupon_id: string | null
+  coupon_ids: string[] | null  // 全部使用的优惠券 ID
   // 售后相关
+  is_coupon_refunded?: boolean
   after_sales_status: 'none' | 'pending' | 'resolved' | 'rejected'
   after_sales_reason: string | null
   after_sales_urge_count: number
@@ -119,11 +121,10 @@ export interface Message {
   msg_type: 'normal' | 'after_sales' | 'after_sales_closed'
   is_read_by_merchant: boolean
   is_read_by_customer: boolean
-  rating?: number | null
   created_at: string
 }
 
-// ---- 优惠�?----
+// ---- 优惠券 ----
 export type CouponTargetType = 'all' | 'category' | 'customer'
 
 export interface Coupon {
@@ -139,9 +140,9 @@ export interface Coupon {
   target_category_id: string | null // 指定分类ID（target_type=category 时）
   target_customer_ids: string[]     // 指定用户ID列表（target_type=customer 时）
   target_item_ids: string[]         // 指定菜品ID列表
-  stackable: boolean                // 可叠加使�?
+  stackable: boolean                // 可叠加使用
   total_quantity: number | null      // 发放总量（null=不限量）
-  claimed_count: number              // 已领取数�?
+  claimed_count: number              // 已领取数量
   rating?: number | null
   created_at: string
 }

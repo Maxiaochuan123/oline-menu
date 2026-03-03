@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import OrderManagerModal from '../../components/OrderManagerModal'
+import OrderCard from '@/components/OrderCard'
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '待处理',
@@ -365,46 +366,14 @@ export default function DashboardPage() {
             if (a.after_sales_status !== 'pending' && b.after_sales_status === 'pending') return 1;
             return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
           }).slice(0, 5).map(order => (
-            <div key={order.id} onClick={() => setSelectedOrder(order)} style={{ cursor: 'pointer' }}>
-              <div className="card animate-fade-in" style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <span className={`tag tag-${order.order_type === 'personal' ? 'personal' : 'company'}`}>
-                      {order.order_type === 'personal' ? '个人' : '公司'}
-                    </span>
-                    <span style={{ fontWeight: '600' }}>{order.customer_name}</span>
-                    <span style={{ color: 'var(--color-text-secondary)', fontSize: '13px' }}>
-                      {lastFourDigits(order.phone)}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                    {formatPrice(Number(order.total_amount))}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span className={`tag tag-status tag-${order.status}`}>
-                      {STATUS_LABELS[order.status] || order.status}
-                    </span>
-                    {order.after_sales_status === 'pending' ? (
-                      <span className="tag tag-pulse-red">
-                        {['completed', 'cancelled'].includes(order.status) ? '! 请求售后' : '! 退单协商'}
-                        {order.after_sales_urge_count > 0 && ` (催 ${order.after_sales_urge_count})`}
-                      </span>
-                    ) : negotiatingOrderIds.has(order.id) && (
-                      <span className="tag tag-pulse-red">
-                        退单协商
-                      </span>
-                    )}
-                    {unreadOrderIds.has(order.id) && !negotiatingOrderIds.has(order.id) && (
-                      <span className="tag tag-pulse-blue">
-                        新消息
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <OrderCard
+              key={order.id}
+              order={order}
+              isUrgent={order.after_sales_status === 'pending' || negotiatingOrderIds.has(order.id)}
+              isNegotiating={negotiatingOrderIds.has(order.id)}
+              isNewMessage={unreadOrderIds.has(order.id)}
+              onClick={() => setSelectedOrder(order)}
+            />
           ))
         )}
       </div>

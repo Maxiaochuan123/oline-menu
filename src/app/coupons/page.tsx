@@ -42,6 +42,9 @@ export default function CouponsPage() {
   // 预览用状态
   const [viewingCoupon, setViewingCoupon] = useState<Coupon | null>(null)
 
+  // 删除确认弹窗
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
   // 树形选择器展开的分类
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
 
@@ -136,8 +139,14 @@ export default function CouponsPage() {
       alert(`删除失败：当前还有 ${stats.pending} 张被客户领取但仍有效的优惠券！\n如果不想继续发放或使用，请先将该券设置「禁用/下架」。只有当所有领取的券都核销或过期后才能物理删除。`)
       return
     }
-    if (!confirm('确定删除此优惠券？相关的过期/核销记录也将被物理清除，建议优先使用「禁用」功能隐藏它。')) return
-    await supabase.from('coupons').delete().eq('id', id)
+    // 打开自定义删除确认弹窗
+    setDeleteConfirmId(id)
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirmId) return
+    await supabase.from('coupons').delete().eq('id', deleteConfirmId)
+    setDeleteConfirmId(null)
     loadData()
   }
 
@@ -230,7 +239,6 @@ export default function CouponsPage() {
                 total_quantity: c.total_quantity
               });
               setViewingCoupon(c);
-              
               const initialExpanded = new Set<string>()
               if (c.target_category_id) initialExpanded.add(c.target_category_id)
               if (c.target_item_ids) {
@@ -240,72 +248,61 @@ export default function CouponsPage() {
                 })
               }
               setExpandedCats(initialExpanded)
-              
               setShowForm(true);
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: '700', fontSize: '15px' }}>{c.title}</span>
-                  <span style={{ fontSize: '18px', fontWeight: '800', color: '#f97316' }}>-¥{c.amount}</span>
-                </div>
-                <div style={{ fontSize: '12px', color: '#999', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {c.min_spend > 0 && <span>满¥{c.min_spend}可用</span>}
-                  <span>有效{c.expiry_days}天</span>
-                  {c.is_global && <span style={{ color: '#22c55e' }}>🆕 新客自动领</span>}
-                  {c.stackable && <span style={{ color: '#8b5cf6' }}>🔗 可叠加</span>}
-                  <div style={{ marginTop: '4px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                    {c.target_type === 'category' && (
-                      <span style={{ fontSize: '10px', background: '#eff6ff', color: '#3b82f6', padding: '1px 6px', borderRadius: '4px' }}>
-                        <Tag size={9} style={{ verticalAlign: 'middle' }} /> 指定分类
-                        {c.target_item_ids?.length > 0 && ` + ${c.target_item_ids.length}个菜品`}
-                      </span>
-                    )}
-                    {c.target_type === 'customer' && (
-                      <span style={{ fontSize: '10px', background: '#faf5ff', color: '#8b5cf6', padding: '1px 6px', borderRadius: '4px' }}>
-                        <Users size={9} style={{ verticalAlign: 'middle' }} /> 指定用户 ({c.target_customer_ids?.length || 0}人)
-                      </span>
-                    )}
-                  </div>
-                  {/* 商家端统计数据小仪表面板 */}
-                  <div style={{ marginTop: '12px', background: '#f5f5f4', padding: '10px 14px', borderRadius: '8px', display: 'flex', gap: '24px', fontSize: '12px', width: 'fit-content' }}>
-                    <div>
-                      <div style={{ color: '#78716c', marginBottom: '4px', fontSize: '11px' }}>发行量</div>
-                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#1c1917' }}>{c.total_quantity || '不限量'}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#78716c', marginBottom: '4px', fontSize: '11px' }}>待使用</div>
-                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#3b82f6' }}>{couponStats[c.id]?.pending || 0}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#78716c', marginBottom: '4px', fontSize: '11px' }}>已使用</div>
-                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#10b981' }}>{couponStats[c.id]?.used || 0}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#78716c', marginBottom: '4px', fontSize: '11px' }}>已过期</div>
-                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#9ca3af' }}>{couponStats[c.id]?.expired || 0}</div>
-                    </div>
-                    {(c.claimed_count || 0) > 0 && (
-                      <div>
-                        <div style={{ color: '#78716c', marginBottom: '4px', fontSize: '11px' }}>领取转化率</div>
-                        <div style={{ fontWeight: '700', fontSize: '14px', color: '#6366f1' }}>{(((couponStats[c.id]?.used || 0) / c.claimed_count) * 100).toFixed(1)}%</div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+            {/* 第一行：券名价格 + 操作按钮 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: '700', fontSize: '15px', whiteSpace: 'nowrap' }}>{c.title}</span>
+                <span style={{ fontSize: '18px', fontWeight: '800', color: '#f97316', whiteSpace: 'nowrap' }}>-¥{c.amount}</span>
               </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0, marginLeft: '8px' }}>
                 <button onClick={(e) => { e.stopPropagation(); toggleStatus(c.id, c.status); }} style={{
                   background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px',
                   color: c.status === 'active' ? '#10b981' : '#a8a29e'
                 }}>
-                  {c.status === 'active' ? '✅ 生效' : '⏸ 禁用'}
+                  {c.status === 'active' ? '✅ 已生效' : '⏸ 已禁用'}
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); deleteCoupon(c.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '12px' }}>
                   删除
                 </button>
               </div>
+            </div>
+
+            {/* 第二行：基础信息标签 */}
+            <div style={{ fontSize: '12px', color: '#999', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginBottom: '8px' }}>
+              {c.min_spend > 0 && <span>满¥{c.min_spend}可用</span>}
+              <span>有效{c.expiry_days}天</span>
+              {c.is_global && <span style={{ color: '#22c55e', background: '#f0fdf4', padding: '0 5px', borderRadius: '4px' }}>🆕 新客自动领</span>}
+              {c.stackable && <span style={{ color: '#8b5cf6', background: '#faf5ff', padding: '0 5px', borderRadius: '4px' }}>🔗 可叠加</span>}
+              {c.target_type === 'category' && (
+                <span style={{ fontSize: '11px', background: '#eff6ff', color: '#3b82f6', padding: '1px 6px', borderRadius: '4px' }}>
+                  <Tag size={9} style={{ verticalAlign: 'middle' }} /> 指定分类
+                  {c.target_item_ids?.length > 0 && ` + ${c.target_item_ids.length}个菜品`}
+                </span>
+              )}
+              {c.target_type === 'customer' && (
+                <span style={{ fontSize: '11px', background: '#faf5ff', color: '#8b5cf6', padding: '1px 6px', borderRadius: '4px' }}>
+                  <Users size={9} style={{ verticalAlign: 'middle' }} /> 指定用户 ({c.target_customer_ids?.length || 0}人)
+                </span>
+              )}
+            </div>
+
+            {/* 第三行：统计数据面板 */}
+            <div style={{ background: '#f5f5f4', padding: '10px 14px', borderRadius: '8px', display: 'flex', gap: '0', fontSize: '12px' }}>
+              {[
+                { label: '发行量', value: c.total_quantity || '不限量', color: '#1c1917' },
+                { label: '待使用', value: couponStats[c.id]?.pending || 0, color: '#3b82f6' },
+                { label: '已使用', value: couponStats[c.id]?.used || 0, color: '#10b981' },
+                { label: '已过期', value: couponStats[c.id]?.expired || 0, color: '#9ca3af' },
+                ...(c.claimed_count > 0 ? [{ label: '领取转化率', value: `${(((couponStats[c.id]?.used || 0) / c.claimed_count) * 100).toFixed(1)}%`, color: '#6366f1' }] : [])
+              ].map((item, idx) => (
+                <div key={idx} style={{ flex: 1, textAlign: 'center', borderRight: idx < 3 || (c.claimed_count > 0 && idx < 4) ? '1px solid #e5e7eb' : 'none' }}>
+                  <div style={{ color: '#78716c', marginBottom: '4px', fontSize: '11px' }}>{item.label}</div>
+                  <div style={{ fontWeight: '700', fontSize: '14px', color: item.color }}>{item.value}</div>
+                </div>
+              ))}
             </div>
           </div>
         ))}
@@ -510,6 +507,55 @@ export default function CouponsPage() {
             ) : (
               <button onClick={addCoupon} className="btn btn-primary btn-block" style={{ marginTop: '16px' }}>立即创建</button>
             )}
+          </div>
+        </>
+      )}
+      {/* 删除确认弹窗 */}
+      {deleteConfirmId && (
+        <>
+          <div
+            className="overlay"
+            style={{ zIndex: 300 }}
+            onClick={() => setDeleteConfirmId(null)}
+          />
+          <div
+            style={{
+              position: 'fixed', top: '50%', left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 301, background: 'white', borderRadius: '16px',
+              padding: '28px 24px', width: '320px', boxShadow: '0 20px 60px rgba(0,0,0,0.18)'
+            }}
+          >
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{ fontSize: '40px', marginBottom: '12px' }}>⚠️</div>
+              <h3 style={{ fontWeight: '800', fontSize: '17px', marginBottom: '8px' }}>确认删除优惠券</h3>
+              <p style={{ fontSize: '13px', color: '#666', lineHeight: '1.6' }}>
+                删除后相关的过期和核销记录也将被同步清除。<br />
+                <span style={{ color: '#f97316', fontWeight: '600' }}>建议优先使用「禁用」而非删除。</span>
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                style={{
+                  flex: 1, height: '42px', border: '1px solid #e5e7eb',
+                  borderRadius: '10px', background: '#f9fafb',
+                  fontSize: '14px', fontWeight: '600', cursor: 'pointer', color: '#374151'
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmDelete}
+                style={{
+                  flex: 1, height: '42px', border: 'none',
+                  borderRadius: '10px', background: '#ef4444',
+                  fontSize: '14px', fontWeight: '700', cursor: 'pointer', color: 'white'
+                }}
+              >
+                确定删除
+              </button>
+            </div>
           </div>
         </>
       )}

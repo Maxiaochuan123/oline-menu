@@ -31,7 +31,9 @@ export default function OrderManagerModal({
   const [showRefundPanel, setShowRefundPanel] = useState(false)
   const [refundMode, setRefundMode] = useState<'fixed' | 'ratio' | 'items'>('fixed')
   const [refundInput, setRefundInput] = useState('')
-  const [selectedRefundItems, setSelectedRefundItems] = useState<Set<string>>(new Set())
+  // 记录选中的退货明细: item.id -> { quantity: number }
+  const [selectedRefundItems, setSelectedRefundItems] = useState<Record<string, number>>({})
+  const [isCouponRefundIncluded, setIsCouponRefundIncluded] = useState(false)
   const [showCancel, setShowCancel] = useState(false)
   const [isConfirmingStatus, setIsConfirmingStatus] = useState(false)
 
@@ -47,13 +49,29 @@ export default function OrderManagerModal({
     }
   }, [messages])
 
+  const [usedCoupon, setUsedCoupon] = useState<any>(null)
+
   useEffect(() => {
     if (order) {
       supabase.from('order_items').select('*').eq('order_id', order.id).then(({ data }) => {
         setOrderItems(data || [])
+        // 默认将所有菜品选满最大数量
+        if (data) {
+          const initQty: Record<string, number> = {}
+          data.forEach(item => {
+            initQty[item.id] = item.quantity
+          })
+          setSelectedRefundItems(initQty)
+        }
       })
+      if (order.coupon_id) {
+        // order.coupon_id 记录的是 coupons 表的 id，直接查 coupons 即可
+        supabase.from('coupons').select('*').eq('id', order.coupon_id).single().then(({ data: couponData }) => {
+          setUsedCoupon(couponData)
+        })
+      }
     }
-  }, [order])
+  }, [order, supabase])
 
   const loadMessages = () => {
     if (!order) return
@@ -109,47 +127,77 @@ export default function OrderManagerModal({
     setSendingAsMsg(false)
   }
 
+  // 当退款项改变、或金额比例等其他模式变化时，智能默认勾选退券
+  useEffect(() => {
+    if (!order || !order.coupon_id || Object.keys(selectedRefundItems).length === 0) return
+    let shouldCheck = false
+    if (refundMode === 'items') {
+      shouldCheck = orderItems.every(i => selectedRefundItems[i.id] === i.quantity)
+    } else if (refundMode === 'fixed') {
+      shouldCheck = Number(refundInput) >= Number(order.total_amount)
+    } else if (refundMode === 'ratio') {
+      shouldCheck = Number(refundInput) >= 100
+    }
+    setTimeout(() => setIsCouponRefundIncluded(shouldCheck), 0)
+  }, [selectedRefundItems, refundMode, order, orderItems, refundInput])
+
   function currentRefundTotal() {
     if (!order) return 0
+    let amt = 0
     if (refundMode === 'fixed') {
       const v = Number(refundInput)
-      return isNaN(v) ? 0 : Math.min(v, Number(order.total_amount))
+      amt = isNaN(v) ? 0 : v
     }
-    if (refundMode === 'ratio') {
+    else if (refundMode === 'ratio') {
       const p = Number(refundInput)
       if (isNaN(p) || p < 0 || p > 100) return 0
-      return Number(order.total_amount) * (p / 100)
+      amt = Number(order.total_amount) * (p / 100)
     }
-    if (refundMode === 'items') {
+    else if (refundMode === 'items') {
       let sum = 0
       orderItems.forEach(i => {
-        if (selectedRefundItems.has(i.id)) {
-          sum += (i.item_price * i.quantity)
-        }
+        const qty = selectedRefundItems[i.id] || 0
+        sum += (i.item_price * qty)
       })
-      return sum
+      amt = sum
     }
-    return 0
+    // 强制封顶策略：任何方式算出的退款额，都不能超过顾客实际支付
+    return Math.min(amt, Number(order.total_amount))
   }
 
   async function handleConfirmRefund() {
     const amt = currentRefundTotal()
     if (amt <= 0) return alert('退款金额必须大于 0')
-    if (amt > Number(order.total_amount)) return alert('退款金额不能大于订单总价')
+    if (amt > Number(order.total_amount)) return alert('退款金额不能大于订单实付额')
     if (!window.confirm(`确认同意售后？将会退款：${formatPrice(amt)} 给客户`)) return
 
     const isFullRefund = amt >= Number(order.total_amount)
-    const { error } = await supabase.from('orders').update({
+    const updatePayload = {
       refund_amount: amt,
       after_sales_status: 'resolved',
       status: isFullRefund ? 'cancelled' : 'completed',
       cancelled_by: isFullRefund ? 'merchant' : order.cancelled_by,
-      cancelled_at: isFullRefund ? new Date().toISOString() : order.cancelled_at
-    }).eq('id', order.id)
+      cancelled_at: isFullRefund ? new Date().toISOString() : order.cancelled_at,
+      is_coupon_refunded: isCouponRefundIncluded, // 记录是否退了券
+    }
 
-    if (error) alert('处理失败')
-    else {
-      await sendAfterSalesMessage(`商家已同意退款并完结本单售后（退款金额：${formatPrice(amt)}）\n祝您生活愉快~`, true)
+    const { error } = await supabase.from('orders').update(updatePayload).eq('id', order.id)
+
+    if (error) {
+      alert('处理失败')
+    } else {
+      // 若选择同时退券
+      if (isCouponRefundIncluded && order.coupon_id && order.customer_id) {
+         // order.coupon_id 是 coupons 表的 id，需要找到本次订单客户消耗的对应可用 user_coupons
+         const { data: uc } = await supabase.from('user_coupons').select('id')
+           .eq('customer_id', order.customer_id).eq('coupon_id', order.coupon_id).eq('status', 'used')
+           .order('used_at', { ascending: false }).limit(1).single()
+         if (uc) {
+            await supabase.from('user_coupons').update({ status: 'unused', used_at: null }).eq('id', uc.id)
+         }
+      }
+      const extInfo = isCouponRefundIncluded ? '\n(同时已为您退回该单所用优惠券)' : ''
+      await sendAfterSalesMessage(`商家已同意退款并完结本单售后（退款金额：${formatPrice(amt)}）${extInfo}\n祝您生活愉快~`, true)
       onSuccess()
       onClose()
     }
@@ -222,7 +270,7 @@ export default function OrderManagerModal({
              {order.after_sales_items && order.after_sales_items.length > 0 && (
                <div style={{ fontSize: '12px', color: '#b91c1c', marginBottom: '10px', background: 'white', padding: '6px', borderRadius: '4px' }}>
                  <strong>不满意菜品：</strong>
-                 {orderItems.filter(i => order.after_sales_items?.includes(i.menu_item_id || i.id)).map(i => i.item_name).join('、')}
+                 {orderItems.filter(i => order.after_sales_items?.includes(i.id)).map(i => i.item_name).join('、')}
                </div>
              )}
              {order.after_sales_images && order.after_sales_images.length > 0 && (
@@ -249,8 +297,25 @@ export default function OrderManagerModal({
            </div>
         )}
         {order.after_sales_status === 'resolved' && (
-           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f0fdf4', color: '#15803d', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: 'bold' }}>
-             <CheckCircle size={16} /> 已完结售后，退款 {formatPrice(Number(order.refund_amount))}
+           <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontSize: '13px', fontWeight: 'bold', marginBottom: '8px' }}>
+               <CheckCircle size={16} /> 已完结售后
+             </div>
+             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#374151', marginBottom: '4px' }}>
+               <span>退款金额</span>
+               <span style={{ fontWeight: '700', color: '#166534' }}>{formatPrice(Number(order.refund_amount))}</span>
+             </div>
+             {order.coupon_id && order.is_coupon_refunded && (
+               <div style={{ marginTop: '8px', padding: '8px 10px', background: '#dcfce7', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid #bbf7d0' }}>
+                 <span>🏷️</span>
+                 <div>
+                   <div style={{ fontSize: '12px', fontWeight: '700', color: '#15803d' }}>已同时退还优惠券</div>
+                   <div style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>
+                     {usedCoupon?.title || '优惠券'} (抵扣 {formatPrice(Number(order.coupon_discount_amount || 0))})
+                   </div>
+                 </div>
+               </div>
+             )}
            </div>
         )}
 
@@ -274,8 +339,18 @@ export default function OrderManagerModal({
               <span>{formatPrice(item.item_price * item.quantity)}</span>
             </div>
           ))}
+          {/* 优惠券折扣行 */}
+          {order.coupon_id && Number(order.coupon_discount_amount) > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '6px 0', color: '#3b82f6', borderTop: '1px dashed var(--color-border)', marginTop: '6px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                🏷️ 优惠券抵扣
+                {usedCoupon?.title && <span style={{ fontSize: '12px', color: '#6b7280' }}>（{usedCoupon.title}）</span>}
+              </span>
+              <span style={{ fontWeight: '600' }}>-{formatPrice(Number(order.coupon_discount_amount))}</span>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', fontSize: '16px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--color-border)' }}>
-            <span>合计</span>
+            <span>实付合计</span>
             <span style={{ color: '#f59e0b' }}>{formatPrice(Number(order.total_amount))}</span>
           </div>
         </div>
@@ -405,8 +480,8 @@ export default function OrderManagerModal({
 
             {refundMode === 'fixed' && (
               <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '6px' }}>输入一口价退款金额 (元)</label>
-                <input type="number" className="input" placeholder="例如：25" value={refundInput} onChange={e => setRefundInput(e.target.value)} />
+                <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '6px' }}>输入一口价退款金额 (最多可退款 {formatPrice(Number(order.total_amount))})</label>
+                <input type="number" className="input" placeholder={`最多: ${order.total_amount}`} value={refundInput} onChange={e => setRefundInput(e.target.value)} />
               </div>
             )}
 
@@ -419,27 +494,89 @@ export default function OrderManagerModal({
 
             {refundMode === 'items' && (
               <div style={{ marginBottom: '16px', maxHeight: '200px', overflowY: 'auto', border: '1px solid #eee', borderRadius: '8px', padding: '8px' }}>
-                {orderItems.map(item => (
-                  <label key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 4px', borderBottom: '1px solid #f9fafb', fontSize: '14px', cursor: 'pointer' }}>
+                {orderItems.map(item => {
+                  const currentQty = selectedRefundItems[item.id] || 0
+                  return (
+                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 4px', borderBottom: '1px solid #f9fafb', fontSize: '14px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', flex: 1 }}>
+                        <input 
+                          type="checkbox" 
+                          checked={currentQty > 0}
+                          onChange={(e) => {
+                            setSelectedRefundItems(prev => ({
+                              ...prev,
+                              [item.id]: e.target.checked ? item.quantity : 0
+                            }))
+                          }}
+                        />
+                        <div>{item.item_name} (原买: {item.quantity})</div>
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #ddd', borderRadius: '4px', background: '#fff' }}>
+                          <button 
+                            style={{ padding: '2px 8px', border: 'none', background: 'transparent', cursor: currentQty <= 1 ? 'not-allowed' : 'pointer', color: currentQty <= 1 ? '#ccc' : '#333' }}
+                            disabled={currentQty <= 1}
+                            onClick={() => setSelectedRefundItems(p => ({ ...p, [item.id]: p[item.id] - 1 }))}
+                          >-</button>
+                          <span style={{ fontSize: '13px', padding: '0 8px', minWidth: '24px', textAlign: 'center' }}>{currentQty}</span>
+                          <button 
+                            style={{ padding: '2px 8px', border: 'none', background: 'transparent', cursor: currentQty >= item.quantity ? 'not-allowed' : 'pointer', color: currentQty >= item.quantity ? '#ccc' : '#333' }}
+                            disabled={currentQty >= item.quantity}
+                            onClick={() => setSelectedRefundItems(p => ({ ...p, [item.id]: (p[item.id] || 0) + 1 }))}
+                          >+</button>
+                        </div>
+                        <div style={{ fontWeight: '600', minWidth: '60px', textAlign: 'right' }}>{formatPrice(item.item_price * currentQty)}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {order.coupon_id && (
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '13px', color: '#666', marginBottom: '8px', fontWeight: 'bold' }}>
+                  客户本单所用的优惠券 
+                  <span style={{ fontSize: '12px', color: '#ef4444', marginLeft: '6px' }}>(勾选优惠券退回给客户)</span>
+                </div>
+                <label style={{ display: 'block', cursor: 'pointer' }}>
+                  <div style={{ 
+                    padding: '12px', background: isCouponRefundIncluded ? '#eff6ff' : '#f9fafb', 
+                    borderRadius: '8px', border: `1px solid ${isCouponRefundIncluded ? '#bfdbfe' : '#e5e7eb'}`, 
+                    display: 'flex', alignItems: 'center', gap: '10px', transition: 'all 0.2s'
+                  }}>
                     <input 
                       type="checkbox" 
-                      checked={selectedRefundItems.has(item.id)}
-                      onChange={(e) => {
-                        const next = new Set(selectedRefundItems)
-                        if (e.target.checked) next.add(item.id)
-                        else next.delete(item.id)
-                        setSelectedRefundItems(next)
-                      }}
+                      style={{ transform: 'scale(1.2)', marginLeft: '4px' }}
+                      checked={isCouponRefundIncluded} 
+                      onChange={e => setIsCouponRefundIncluded(e.target.checked)} 
                     />
-                    <div style={{ flex: 1 }}>{item.item_name} x{item.quantity}</div>
-                    <div style={{ fontWeight: '600' }}>{formatPrice(item.item_price * item.quantity)}</div>
-                  </label>
-                ))}
+                    <div style={{ width: '40px', height: '40px', background: isCouponRefundIncluded ? '#3b82f6' : '#9ca3af', color: '#fff', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <span style={{ fontSize: '14px', fontWeight: 'bold' }}>券</span>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '14px', fontWeight: 'bold', color: isCouponRefundIncluded ? '#1e3a8a' : '#374151' }}>
+                          {usedCoupon?.title || '正在加载优惠券...'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '12px', color: isCouponRefundIncluded ? '#3b82f6' : '#6b7280', marginTop: '4px' }}>
+                        抵扣额度: {formatPrice(Number(order.coupon_discount_amount || usedCoupon?.amount || 0))} 
+                        {isCouponRefundIncluded ? ' · 即将退回客户账户' : ''}
+                      </div>
+                    </div>
+                  </div>
+                </label>
               </div>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '20px', marginBottom: '16px', background: '#fff7ed', padding: '12px', borderRadius: '8px' }}>
-              <span style={{ fontSize: '14px', fontWeight: '700', color: '#9a3412' }}>拟退款金额合计</span>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '14px', fontWeight: '700', color: '#9a3412' }}>拟退款金额合计</span>
+                {currentRefundTotal() >= Number(order.total_amount) && (
+                  <span style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>不可大于实付 {formatPrice(Number(order.total_amount))}</span>
+                )}
+              </div>
               <span style={{ fontSize: '24px', fontWeight: '800', color: '#ea580c' }}>{formatPrice(currentRefundTotal())}</span>
             </div>
 

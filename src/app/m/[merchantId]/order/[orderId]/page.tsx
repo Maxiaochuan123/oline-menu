@@ -7,7 +7,7 @@ import type { Order, Merchant, OrderItem, Message } from '@/lib/types'
 import { formatPrice, getCountdown } from '@/lib/utils'
 import { calculateCancellationPenalty } from '@/lib/order'
 import { 
-  CheckCircle2, Clock, MapPin, MessageSquare, Send, Star, AlertTriangle, AlertCircle, ChevronLeft, ChevronRight, X,
+  CheckCircle2, Clock, MapPin, MessageSquare, Send, Star, AlertCircle, X,
   ArrowLeft, RefreshCw, QrCode
 } from 'lucide-react'
 import Link from 'next/link'
@@ -82,13 +82,14 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
 
   // 取消原因
   const [cancelReason, setCancelReason] = useState('')
+  // 客户本单使用的优惠券详情（支持多张）
+  const [usedCoupons, setUsedCoupons] = useState<{ id: string; title: string; amount: number }[]>([])
 
   useEffect(() => {
     if (!order || order.after_sales_status !== 'pending') {
       setUrgeCountdown(0)
       return
     }
-    // eslint-disable-next-line
     const timer = setInterval(() => {
       const lastUrge = order.after_sales_last_urge_at ? new Date(order.after_sales_last_urge_at).getTime() : 0
       const now = new Date().getTime()
@@ -117,6 +118,12 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
     if (oRes.data) setOrder(oRes.data)
     if (mRes.data) setMerchant(mRes.data)
     if (iRes.data) setItems(iRes.data)
+    // 加载所有使用的优惠券信息（支持多张）
+    const ids = oRes.data?.coupon_ids ?? (oRes.data?.coupon_id ? [oRes.data.coupon_id] : [])
+    if (ids.length > 0) {
+      const { data: couponList } = await supabase.from('coupons').select('id, title, amount').in('id', ids)
+      setUsedCoupons(couponList || [])
+    }
     // 加载消息
     loadMessages()
     setLoading(false)
@@ -288,7 +295,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
       return alert('请补充填写详细情况')
     }
 
-    let uploadedUrls: string[] = []
+    const uploadedUrls: string[] = []
     if (['有异物', '包装破损严重'].includes(afterSalesReason) && afterSalesImages.length > 0) {
       setUploadingImage(true)
       try {
@@ -299,8 +306,8 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
           const { data: { publicUrl } } = supabase.storage.from('after_sales_images').getPublicUrl(fileName)
           uploadedUrls.push(publicUrl)
         }
-      } catch (err: any) {
-        alert('图片上传失败: ' + err.message)
+      } catch (err: unknown) {
+        alert('图片上传失败: ' + (err instanceof Error ? err.message : String(err)))
         setUploadingImage(false)
         return
       }
@@ -561,8 +568,45 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
              </div>
           )}
           {order.after_sales_status === 'resolved' && (
-             <div style={{ background: '#f0fdf4', color: '#15803d', padding: '12px', borderRadius: '8px', fontSize: '13px', textAlign: 'center', fontWeight: 'bold', marginBottom: '16px' }}>
-               售后处理完毕
+             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
+               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#15803d', fontWeight: '800', fontSize: '15px', marginBottom: '12px' }}>
+                 <CheckCircle2 size={20} /> 售后处理完毕
+               </div>
+
+               {/* 退款金额 */}
+               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px dashed #bbf7d0', fontSize: '14px', color: '#374151' }}>
+                 <span>退款金额</span>
+                 <span style={{ fontWeight: '800', color: '#166534', fontSize: '16px' }}>{formatPrice(Number(order.refund_amount))}</span>
+               </div>
+
+               {/* 退款方式 */}
+               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: '13px', color: '#6b7280' }}>
+                 <span>退款方式</span>
+                 <span>原路退回</span>
+               </div>
+
+               {/* 退回优惠券：显示具体券名 */}
+               {order.coupon_id && order.is_coupon_refunded && (
+                 <div style={{
+                   marginTop: '10px', padding: '10px 12px',
+                   background: '#dcfce7', borderRadius: '8px',
+                   display: 'flex', alignItems: 'center', gap: '10px',
+                   border: '1px solid #bbf7d0'
+                 }}>
+                   <div style={{ width: '36px', height: '36px', background: '#16a34a', color: '#fff', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                     <span style={{ fontSize: '16px' }}>🏷️</span>
+                   </div>
+                   <div style={{ flex: 1 }}>
+                     <div style={{ fontSize: '13px', fontWeight: '700', color: '#15803d' }}>下列优惠券已退回至您账户</div>
+                      <div style={{ fontSize: '14px', fontWeight: '800', color: '#166534', marginTop: '3px' }}>
+                        {usedCoupons.length > 0 ? usedCoupons.map(c => c.title).join(' + ') : '优惠券'}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
+                        抵扣额度 {formatPrice(Number(order.coupon_discount_amount || 0))} · 可在下次下单时正常使用
+                     </div>
+                   </div>
+                 </div>
+               )}
              </div>
           )}
           {order.after_sales_status === 'rejected' && (
@@ -612,6 +656,38 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
             <span style={{ fontSize: '15px', fontWeight: '700' }}>应付金额</span>
             <span style={{ fontSize: '20px', fontWeight: '800', color: 'var(--color-primary)' }}>{formatPrice(Number(order.total_amount))}</span>
           </div>
+          {/* 优惠券明细：逐张展示券名 */}
+          {usedCoupons.length > 0 && Number(order.coupon_discount_amount) > 0 && (
+            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #e5f0ff' }}>
+              {usedCoupons.map((coupon, idx) => (
+                <div key={coupon.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#3b82f6', marginBottom: idx < usedCoupons.length - 1 ? '4px' : 0 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    🏷️ {coupon.title}
+                  </span>
+                  <span style={{ fontWeight: '600' }}>-{formatPrice(coupon.amount)}</span>
+                </div>
+              ))}
+              {usedCoupons.length > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6b7280', marginTop: '4px', paddingTop: '4px', borderTop: '1px dashed #e5e7eb' }}>
+                  <span>共优惠</span>
+                  <span style={{ fontWeight: '600', color: '#3b82f6' }}>-{formatPrice(Number(order.coupon_discount_amount))}</span>
+                </div>
+              )}
+            </div>
+          )}
+          {/* 售后退款信息 */}
+          {order.after_sales_status === 'resolved' && order.refund_amount && (
+            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #eee' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#dc2626' }}>
+                <span>售后退款</span>
+                <span style={{ fontWeight: '700' }}>-{formatPrice(Number(order.refund_amount))}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '14px', fontWeight: '800' }}>
+                <span>实际支付</span>
+                <span style={{ color: 'var(--color-primary)' }}>{formatPrice(Math.max(0, Number(order.total_amount) - Number(order.refund_amount)))}</span>
+              </div>
+            </div>
+          )}
           <div style={{ fontSize: '12px', color: '#999', marginTop: '12px', textAlign: 'right' }}>
             下单时间：{new Date(order.created_at).toLocaleString('zh-CN')}
           </div>
