@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import React from 'react'
+import OrderItemsCard from '@/components/OrderItemsCard'
+import type { UsedCoupon } from '@/components/OrderItemsCard'
 
 const STATUS_MAP: Record<string, { label: string, color: string, step: number }> = {
   pending: { label: '待收单', color: '#f97316', step: 1 },
@@ -83,7 +85,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
   // 取消原因
   const [cancelReason, setCancelReason] = useState('')
   // 客户本单使用的优惠券详情（支持多张）
-  const [usedCoupons, setUsedCoupons] = useState<{ id: string; title: string; amount: number }[]>([])
+  const [usedCoupons, setUsedCoupons] = useState<UsedCoupon[]>([])
 
   useEffect(() => {
     if (!order || order.after_sales_status !== 'pending') {
@@ -643,54 +645,18 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
 
         {/* 菜品明细卡片 */}
         <div className="card">
-          <h3 style={{ fontSize: '15px', fontWeight: '800', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #f5f5f4' }}>
-            订单内容
-          </h3>
-          {items.map(item => (
-            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '12px' }}>
-              <span>{item.item_name} x{item.quantity}</span>
-              <span style={{ fontWeight: '600' }}>{formatPrice(item.item_price * item.quantity)}</span>
-            </div>
-          ))}
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px dashed #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '15px', fontWeight: '700' }}>应付金额</span>
-            <span style={{ fontSize: '20px', fontWeight: '800', color: 'var(--color-primary)' }}>{formatPrice(Number(order.total_amount))}</span>
-          </div>
-          {/* 优惠券明细：逐张展示券名 */}
-          {usedCoupons.length > 0 && Number(order.coupon_discount_amount) > 0 && (
-            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #e5f0ff' }}>
-              {usedCoupons.map((coupon, idx) => (
-                <div key={coupon.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#3b82f6', marginBottom: idx < usedCoupons.length - 1 ? '4px' : 0 }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    🏷️ {coupon.title}
-                  </span>
-                  <span style={{ fontWeight: '600' }}>-{formatPrice(coupon.amount)}</span>
-                </div>
-              ))}
-              {usedCoupons.length > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6b7280', marginTop: '4px', paddingTop: '4px', borderTop: '1px dashed #e5e7eb' }}>
-                  <span>共优惠</span>
-                  <span style={{ fontWeight: '600', color: '#3b82f6' }}>-{formatPrice(Number(order.coupon_discount_amount))}</span>
-                </div>
-              )}
-            </div>
-          )}
-          {/* 售后退款信息 */}
-          {order.after_sales_status === 'resolved' && order.refund_amount && (
-            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #eee' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#dc2626' }}>
-                <span>售后退款</span>
-                <span style={{ fontWeight: '700' }}>-{formatPrice(Number(order.refund_amount))}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '14px', fontWeight: '800' }}>
-                <span>实际支付</span>
-                <span style={{ color: 'var(--color-primary)' }}>{formatPrice(Math.max(0, Number(order.total_amount) - Number(order.refund_amount)))}</span>
-              </div>
-            </div>
-          )}
-          <div style={{ fontSize: '12px', color: '#999', marginTop: '12px', textAlign: 'right' }}>
-            下单时间：{new Date(order.created_at).toLocaleString('zh-CN')}
-          </div>
+          <OrderItemsCard
+            title="订单内容"
+            titleAsHeading
+            items={items}
+            usedCoupons={usedCoupons}
+            couponDiscountAmount={Number(order.coupon_discount_amount)}
+            totalAmount={Number(order.total_amount)}
+            createdAt={order.created_at}
+            refundAmount={order.refund_amount}
+            refundResolved={order.after_sales_status === 'resolved'}
+            totalColor="var(--color-primary)"
+          />
         </div>
       </div>
 

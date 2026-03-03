@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { AlertTriangle, CheckCircle, ChevronRight, X, Send, MessageSquare } from 'lucide-react'
 import { formatPrice } from '@/lib/utils'
+import OrderItemsCard from '@/components/OrderItemsCard'
+import type { UsedCoupon } from '@/components/OrderItemsCard'
 import type { Order, Message } from '@/lib/types'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -49,13 +51,12 @@ export default function OrderManagerModal({
     }
   }, [messages])
 
-  const [usedCoupon, setUsedCoupon] = useState<any>(null)
+  const [usedCoupons, setUsedCoupons] = useState<UsedCoupon[]>([])
 
   useEffect(() => {
     if (order) {
       supabase.from('order_items').select('*').eq('order_id', order.id).then(({ data }) => {
         setOrderItems(data || [])
-        // 默认将所有菜品选满最大数量
         if (data) {
           const initQty: Record<string, number> = {}
           data.forEach(item => {
@@ -64,10 +65,11 @@ export default function OrderManagerModal({
           setSelectedRefundItems(initQty)
         }
       })
-      if (order.coupon_id) {
-        // order.coupon_id 记录的是 coupons 表的 id，直接查 coupons 即可
-        supabase.from('coupons').select('*').eq('id', order.coupon_id).single().then(({ data: couponData }) => {
-          setUsedCoupon(couponData)
+      // 加载所有使用的优惠券（支持多张）
+      const ids: string[] = order.coupon_ids ?? (order.coupon_id ? [order.coupon_id] : [])
+      if (ids.length > 0) {
+        supabase.from('coupons').select('id, title, amount').in('id', ids).then(({ data: couponList }) => {
+          setUsedCoupons(couponList || [])
         })
       }
     }
@@ -310,9 +312,10 @@ export default function OrderManagerModal({
                  <span>🏷️</span>
                  <div>
                    <div style={{ fontSize: '12px', fontWeight: '700', color: '#15803d' }}>已同时退还优惠券</div>
-                   <div style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>
-                     {usedCoupon?.title || '优惠券'} (抵扣 {formatPrice(Number(order.coupon_discount_amount || 0))})
-                   </div>
+                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>
+                      {usedCoupons.length > 0 ? usedCoupons.map(c => c.title).join(' + ') : '优惠券'}
+                      （抵扣 {formatPrice(Number(order.coupon_discount_amount || 0))}）
+                    </div>
                  </div>
                </div>
              )}
@@ -332,27 +335,17 @@ export default function OrderManagerModal({
           <div><strong>预定时间：</strong>{new Date(order.scheduled_time).toLocaleString('zh-CN')}</div>
         </div>
         <div style={{ margin: '12px 0', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
-          <strong style={{ fontSize: '14px' }}>菜品明细：</strong>
-          {orderItems.map(item => (
-            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', padding: '4px 0' }}>
-              <span>{item.item_name} x{item.quantity} {item.remark ? `(${item.remark})` : ''}</span>
-              <span>{formatPrice(item.item_price * item.quantity)}</span>
-            </div>
-          ))}
-          {/* 优惠券折扣行 */}
-          {order.coupon_id && Number(order.coupon_discount_amount) > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', padding: '6px 0', color: '#3b82f6', borderTop: '1px dashed var(--color-border)', marginTop: '6px' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                🏷️ 优惠券抵扣
-                {usedCoupon?.title && <span style={{ fontSize: '12px', color: '#6b7280' }}>（{usedCoupon.title}）</span>}
-              </span>
-              <span style={{ fontWeight: '600' }}>-{formatPrice(Number(order.coupon_discount_amount))}</span>
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', fontSize: '16px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--color-border)' }}>
-            <span>实付合计</span>
-            <span style={{ color: '#f59e0b' }}>{formatPrice(Number(order.total_amount))}</span>
-          </div>
+          <OrderItemsCard
+            title="菜品明细"
+            titleAsHeading={false}
+            items={orderItems}
+            showRemark
+            usedCoupons={usedCoupons}
+            couponDiscountAmount={Number(order.coupon_discount_amount)}
+            totalAmount={Number(order.total_amount)}
+            createdAt={order.created_at}
+            totalColor="#f59e0b"
+          />
         </div>
 
         {/* --- 统一客户沟通记录区 (P12-D 升级版) --- */}
@@ -557,11 +550,11 @@ export default function OrderManagerModal({
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span style={{ fontSize: '14px', fontWeight: 'bold', color: isCouponRefundIncluded ? '#1e3a8a' : '#374151' }}>
-                          {usedCoupon?.title || '正在加载优惠券...'}
+                          {usedCoupons.length > 0 ? usedCoupons.map(c => c.title).join(' + ') : '加载中...'}
                         </span>
                       </div>
                       <div style={{ fontSize: '12px', color: isCouponRefundIncluded ? '#3b82f6' : '#6b7280', marginTop: '4px' }}>
-                        抵扣额度: {formatPrice(Number(order.coupon_discount_amount || usedCoupon?.amount || 0))} 
+                        抵扣额度: {formatPrice(Number(order.coupon_discount_amount || 0))} 
                         {isCouponRefundIncluded ? ' · 即将退回客户账户' : ''}
                       </div>
                     </div>
