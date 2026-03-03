@@ -424,7 +424,6 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           vip_discount_rate: discountResult.vipLevel.rate,
           vip_discount_amount: discountResult.vipDiscountAmount,
           coupon_discount_amount: discountResult.couponDiscountAmount,
-          coupon_id: sortedSelectedCoupons.find(c => !c.coupon?.stackable)?.coupon_id ?? sortedSelectedCoupons[0]?.coupon_id ?? null,
           coupon_ids: sortedSelectedCoupons.map(c => c.coupon_id),
           status: 'pending',
         })

@@ -121,7 +121,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
     if (mRes.data) setMerchant(mRes.data)
     if (iRes.data) setItems(iRes.data)
     // 加载所有使用的优惠券信息（支持多张）
-    const ids = oRes.data?.coupon_ids ?? (oRes.data?.coupon_id ? [oRes.data.coupon_id] : [])
+    const ids = oRes.data?.coupon_ids ?? []
     if (ids.length > 0) {
       const { data: couponList } = await supabase.from('coupons').select('id, title, amount').in('id', ids)
       setUsedCoupons(couponList || [])
@@ -273,15 +273,29 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
         penalty_rate: penaltyRes.rate,
         penalty_amount: penaltyAmount,
         refund_amount: refundAmount,
-        after_sales_reason: cancelReason.trim()
+        after_sales_reason: cancelReason.trim(),
+        is_coupon_refunded: true,
       })
       .eq('id', order.id)
 
-    if (error) alert('取消失败')
-    else {
-      setShowCancelConfirm(false)
-      loadData()
+    if (error) {
+      alert('取消失败')
+      return
     }
+
+    // 退还本单使用的所有优惠券
+    const couponIds: string[] = order.coupon_ids ?? []
+    if (couponIds.length > 0 && order.customer_id) {
+      await supabase
+        .from('user_coupons')
+        .update({ status: 'unused', used_at: null })
+        .eq('customer_id', order.customer_id)
+        .in('coupon_id', couponIds)
+        .eq('status', 'used')
+    }
+
+    setShowCancelConfirm(false)
+    loadData()
   }
 
   async function handleSubmitAfterSales() {
@@ -499,7 +513,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
             <button 
               className="btn btn-outline btn-block"
               style={{ color: '#ef4444' }}
-              onClick={() => setShowCancelConfirm(true)}
+              onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}
             >
               取消订单
             </button>
@@ -509,7 +523,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
             <button 
               className="btn btn-outline btn-block"
               style={{ color: '#ef4444' }}
-              onClick={() => setShowCancelConfirm(true)}
+              onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}
             >
               退单
             </button>
@@ -520,7 +534,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
               <button 
                 className="btn btn-outline"
                 style={{ flex: 1, color: '#ef4444', borderColor: '#fca5a5' }}
-                onClick={() => setShowCancelConfirm(true)}
+                onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}
               >
                 强制退单
               </button>
@@ -588,7 +602,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
                </div>
 
                {/* 退回优惠券：显示具体券名 */}
-               {order.coupon_id && order.is_coupon_refunded && (
+               {(order.coupon_ids?.length ?? 0) > 0 && order.is_coupon_refunded && (
                  <div style={{
                    marginTop: '10px', padding: '10px 12px',
                    background: '#dcfce7', borderRadius: '8px',
@@ -877,22 +891,31 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button 
-                className="btn btn-outline" 
-                style={{ flex: 1 }} 
-                onClick={() => setShowCancelConfirm(false)}
-              >
-                再想想
-              </button>
-              <button 
-                className="btn btn-danger" 
-                style={{ flex: 1 }}
-                disabled={!cancelReason}
-                onClick={handleCancel}
-              >
-                确认取消
-              </button>
+            <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+              {!cancelReason && (
+                <p style={{ fontSize: '12px', color: '#f97316', textAlign: 'center', margin: 0 }}>请先选择取消原因</p>
+              )}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  className="btn btn-outline" 
+                  style={{ flex: 1 }} 
+                  onClick={() => setShowCancelConfirm(false)}
+                >
+                  再想想
+                </button>
+                <button 
+                  className="btn btn-danger" 
+                  style={{ 
+                    flex: 1,
+                    opacity: cancelReason ? 1 : 0.4,
+                    cursor: cancelReason ? 'pointer' : 'not-allowed'
+                  }}
+                  disabled={!cancelReason}
+                  onClick={handleCancel}
+                >
+                  确认取消
+                </button>
+              </div>
             </div>
           </div>
         </>

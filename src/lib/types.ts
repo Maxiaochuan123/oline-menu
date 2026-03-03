@@ -76,7 +76,6 @@ export interface Order {
   vip_discount_rate: number
   vip_discount_amount: number
   coupon_discount_amount: number
-  coupon_id: string | null
   coupon_ids: string[] | null  // 全部使用的优惠券 ID
   // 售后相关
   is_coupon_refunded?: boolean

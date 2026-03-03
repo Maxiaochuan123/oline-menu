@@ -66,7 +66,7 @@ export default function OrderManagerModal({
         }
       })
       // 加载所有使用的优惠券（支持多张）
-      const ids: string[] = order.coupon_ids ?? (order.coupon_id ? [order.coupon_id] : [])
+      const ids: string[] = order.coupon_ids ?? []
       if (ids.length > 0) {
         supabase.from('coupons').select('id, title, amount').in('id', ids).then(({ data: couponList }) => {
           setUsedCoupons(couponList || [])
@@ -131,7 +131,7 @@ export default function OrderManagerModal({
 
   // 当退款项改变、或金额比例等其他模式变化时，智能默认勾选退券
   useEffect(() => {
-    if (!order || !order.coupon_id || Object.keys(selectedRefundItems).length === 0) return
+    if (!order || !(order.coupon_ids?.length > 0) || Object.keys(selectedRefundItems).length === 0) return
     let shouldCheck = false
     if (refundMode === 'items') {
       shouldCheck = orderItems.every(i => selectedRefundItems[i.id] === i.quantity)
@@ -189,14 +189,17 @@ export default function OrderManagerModal({
       alert('处理失败')
     } else {
       // 若选择同时退券
-      if (isCouponRefundIncluded && order.coupon_id && order.customer_id) {
-         // order.coupon_id 是 coupons 表的 id，需要找到本次订单客户消耗的对应可用 user_coupons
-         const { data: uc } = await supabase.from('user_coupons').select('id')
-           .eq('customer_id', order.customer_id).eq('coupon_id', order.coupon_id).eq('status', 'used')
-           .order('used_at', { ascending: false }).limit(1).single()
-         if (uc) {
-            await supabase.from('user_coupons').update({ status: 'unused', used_at: null }).eq('id', uc.id)
-         }
+      if (isCouponRefundIncluded && order.customer_id) {
+        const couponIds: string[] = order.coupon_ids ?? []
+        if (couponIds.length > 0) {
+          // 批量退还本单所有已使用的优惠券
+          await supabase
+            .from('user_coupons')
+            .update({ status: 'unused', used_at: null })
+            .eq('customer_id', order.customer_id)
+            .in('coupon_id', couponIds)
+            .eq('status', 'used')
+        }
       }
       const extInfo = isCouponRefundIncluded ? '\n(同时已为您退回该单所用优惠券)' : ''
       await sendAfterSalesMessage(`商家已同意退款并完结本单售后（退款金额：${formatPrice(amt)}）${extInfo}\n祝您生活愉快~`, true)
@@ -307,7 +310,7 @@ export default function OrderManagerModal({
                <span>退款金额</span>
                <span style={{ fontWeight: '700', color: '#166534' }}>{formatPrice(Number(order.refund_amount))}</span>
              </div>
-             {order.coupon_id && order.is_coupon_refunded && (
+             {(order.coupon_ids?.length ?? 0) > 0 && order.is_coupon_refunded && (
                <div style={{ marginTop: '8px', padding: '8px 10px', background: '#dcfce7', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid #bbf7d0' }}>
                  <span>🏷️</span>
                  <div>
@@ -526,7 +529,7 @@ export default function OrderManagerModal({
               </div>
             )}
 
-            {order.coupon_id && (
+            {(order.coupon_ids?.length ?? 0) > 0 && (
               <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontSize: '13px', color: '#666', marginBottom: '8px', fontWeight: 'bold' }}>
                   客户本单所用的优惠券 
