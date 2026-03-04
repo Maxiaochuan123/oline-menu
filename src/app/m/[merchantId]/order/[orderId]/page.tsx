@@ -613,12 +613,25 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
                      <span style={{ fontSize: '16px' }}>🏷️</span>
                    </div>
                    <div style={{ flex: 1 }}>
-                     <div style={{ fontSize: '13px', fontWeight: '700', color: '#15803d' }}>下列优惠券已退回至您账户</div>
-                      <div style={{ fontSize: '14px', fontWeight: '800', color: '#166534', marginTop: '3px' }}>
-                        {usedCoupons.length > 0 ? usedCoupons.map(c => c.title).join(' + ') : '优惠券'}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
-                        抵扣额度 {formatPrice(Number(order.coupon_discount_amount || 0))} · 可在下次下单时正常使用
+                     <div style={{ fontSize: '13px', fontWeight: '700', color: '#15803d', marginBottom: '6px' }}>下列优惠券已退回至您账户</div>
+                     {usedCoupons.length > 0 ? (
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                         {usedCoupons.map((c, idx) => (
+                           <div key={c.id} style={{ 
+                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                             paddingBottom: idx === usedCoupons.length - 1 ? 0 : '4px',
+                             borderBottom: idx === usedCoupons.length - 1 ? 'none' : '1px dashed rgba(21, 128, 61, 0.2)'
+                           }}>
+                             <div style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>🏷️ {c.title}</div>
+                             <div style={{ fontSize: '13px', fontWeight: '900', color: '#15803d' }}>{formatPrice(c.amount)}</div>
+                           </div>
+                         ))}
+                       </div>
+                     ) : (
+                       <div style={{ fontSize: '14px', fontWeight: '800', color: '#166534' }}>优惠券已退回</div>
+                     )}
+                     <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '8px', opacity: 0.9, fontWeight: '600' }}>
+                       * 以上券额可在下次下单时直接使用
                      </div>
                    </div>
                  </div>
