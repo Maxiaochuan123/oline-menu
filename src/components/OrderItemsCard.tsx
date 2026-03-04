@@ -14,6 +14,9 @@ export interface UsedCoupon {
   id: string
   title: string
   amount: number
+  target_type?: 'all' | 'category' | 'customer' | null
+  target_category_id?: string | null
+  target_item_ids?: string[] | null // 用于精准匹配特定菜品
 }
 
 interface Props {
@@ -37,6 +40,10 @@ interface Props {
   refundAmount?: number | null
   /** 是否已完成售后退款（传入 refundAmount 同时也需将此设为 true） */
   refundResolved?: boolean
+  /** 违约金比例（0~1），有取消违约时传入 */
+  penaltyRate?: number | null
+  /** 违约金金额，有取消违约时传入 */
+  penaltyAmount?: number | null
   /** 实付合计字体颜色，商家端 amber，客户端 orange */
   totalColor?: string
 }
@@ -60,6 +67,8 @@ export default function OrderItemsCard({
   createdAt,
   refundAmount,
   refundResolved = false,
+  penaltyRate,
+  penaltyAmount,
   totalColor = '#f59e0b',
 }: Props) {
   return (
@@ -128,7 +137,21 @@ export default function OrderItemsCard({
         </span>
       </div>
 
-      {/* 售后退款（仅客户端使用） */}
+      {/* 违约金明细（取消订单有违约时显示） */}
+      {!!penaltyRate && penaltyRate > 0 && !!penaltyAmount && penaltyAmount > 0 && (
+        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #fecaca' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#ef4444' }}>
+            <span>违约金 ({(penaltyRate * 100).toFixed(0)}%)</span>
+            <span style={{ fontWeight: '700' }}>-{formatPrice(penaltyAmount)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '14px', fontWeight: '800' }}>
+            <span>实际退款</span>
+            <span style={{ color: '#22c55e' }}>{formatPrice(Math.max(0, totalAmount - penaltyAmount))}</span>
+          </div>
+        </div>
+      )}
+
+      {/* 售后退款（售后处理后展示） */}
       {refundResolved && refundAmount && (
         <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #eee' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#dc2626' }}>

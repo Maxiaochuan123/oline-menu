@@ -157,8 +157,21 @@ export default function MenuPage() {
   }
 
   async function deleteItem(id: string) {
-    if (!confirm('确定删除这道菜品？')) return
-    await supabase.from('menu_items').delete().eq('id', id)
+    // 检查是否有历史订单引用了这道菜品
+    const { count } = await supabase
+      .from('order_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('menu_item_id', id)
+
+    if ((count ?? 0) > 0) {
+      // 有历史订单引用 → 只能软删除（下架隐藏）
+      if (!confirm(`该菜品已有 ${count} 条历史订单记录，无法彻底删除。\n是否将其下架隐藏？（历史订单数据不受影响）`)) return
+      await supabase.from('menu_items').update({ is_available: false }).eq('id', id)
+    } else {
+      // 从未被下单 → 可以物理删除
+      if (!confirm('确定要彻底删除这道菜品？此操作不可恢复。')) return
+      await supabase.from('menu_items').delete().eq('id', id)
+    }
     loadData()
   }
 

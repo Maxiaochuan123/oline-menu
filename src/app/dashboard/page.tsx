@@ -16,13 +16,6 @@ import Link from 'next/link'
 import OrderManagerModal from '../../components/OrderManagerModal'
 import OrderCard from '@/components/OrderCard'
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: '待处理',
-  preparing: '制作中',
-  delivering: '配送中',
-  completed: '已完成',
-  cancelled: '已取消'
-}
 
 export default function DashboardPage() {
   const supabase = createClient()
@@ -33,6 +26,7 @@ export default function DashboardPage() {
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
   const [unreadMsgCount, setUnreadMsgCount] = useState(0)
+  const [pendingAfterSalesCount, setPendingAfterSalesCount] = useState(0)
 
   // 订单详情状态 (复用外部组件)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
@@ -80,6 +74,15 @@ export default function DashboardPage() {
         .map(m => m.order_id) || []
     ))
 
+    // 待售后订单数量 (全历史)
+    const { count: afterSalesCount } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('merchant_id', merchantData.id)
+      .eq('after_sales_status', 'pending')
+
+    setPendingAfterSalesCount(afterSalesCount || 0)
+
     setLoading(false)
   }, [supabase, router])
 
@@ -116,7 +119,11 @@ export default function DashboardPage() {
             setTimeout(() => speak(`${lastFourDigits(updated.phone)}取消订单啦！`), 100)
           }
           if (updated.after_sales_status === 'pending' && old.after_sales_status !== 'pending') {
+            setPendingAfterSalesCount(c => c + 1)
             setTimeout(() => speak(`尾号 ${lastFourDigits(updated.phone)} 的客户申请了售后 理由是 ${updated.after_sales_reason || '未知'} 请尽快处理！`), 200)
+          }
+          if (updated.after_sales_status !== 'pending' && old.after_sales_status === 'pending') {
+            setPendingAfterSalesCount(c => Math.max(0, c - 1))
           }
           if (updated.after_sales_status === 'pending' && old.after_sales_status === 'pending') {
             const oldUrge = old.after_sales_urge_count || 0
@@ -289,9 +296,16 @@ export default function DashboardPage() {
             <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <ClipboardList size={22} color="#3b82f6" />
             </div>
-            <div>
-              <div style={{ fontWeight: '600', fontSize: '15px' }}>订单管理</div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>查看和处理订单</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                <span style={{ whiteSpace: 'nowrap' }}>订单管理</span>
+                {pendingAfterSalesCount > 0 && (
+                  <span className="tag tag-status tag-pulse-red" style={{ transform: 'scale(0.85)', transformOrigin: 'left center' }}>
+                    ! 待售后 ({pendingAfterSalesCount})
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>查看和处理订单</div>
             </div>
           </div>
         </Link>

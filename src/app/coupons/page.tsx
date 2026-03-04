@@ -145,7 +145,20 @@ export default function CouponsPage() {
 
   async function confirmDelete() {
     if (!deleteConfirmId) return
-    await supabase.from('coupons').delete().eq('id', deleteConfirmId)
+    // 检查是否有用户领取/使用记录
+    const { count } = await supabase
+      .from('user_coupons')
+      .select('id', { count: 'exact', head: true })
+      .eq('coupon_id', deleteConfirmId)
+
+    if ((count ?? 0) > 0) {
+      // 有领取记录 → 只能软删除（禁用）
+      await supabase.from('coupons').update({ status: 'disabled' }).eq('id', deleteConfirmId)
+      alert(`该券已有 ${count} 条领取记录，已自动转为"禁用"状态。`)
+    } else {
+      // 从未被领取 → 可以物理删除
+      await supabase.from('coupons').delete().eq('id', deleteConfirmId)
+    }
     setDeleteConfirmId(null)
     loadData()
   }

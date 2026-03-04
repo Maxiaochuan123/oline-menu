@@ -669,6 +669,8 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
             createdAt={order.created_at}
             refundAmount={order.refund_amount}
             refundResolved={order.after_sales_status === 'resolved'}
+            penaltyRate={order.penalty_rate}
+            penaltyAmount={order.penalty_amount}
             totalColor="var(--color-primary)"
           />
         </div>
