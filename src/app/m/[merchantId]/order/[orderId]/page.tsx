@@ -146,14 +146,24 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
       }, (payload) => {
         setOrder(payload.new as Order)
       })
-      // 实时收到留言/评论（覆盖了原先由于分离表导致的重复监听）
+      // 实时收到留言/评论 (优化：支持局部追加)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
         filter: `order_id=eq.${orderId}`,
-      }, () => {
-        loadMessages()
+      }, (payload) => {
+        const newMessage = payload.new as Message
+        setMessages(prev => {
+          // 防止重复插入（有些客户端网络抖动可能触发两次监听）
+          if (prev.some(m => m.id === newMessage.id)) return prev
+          return [...prev, newMessage]
+        })
+        
+        // 如果是商家发的，标记已读
+        if (newMessage.sender === 'merchant') {
+          supabase.from('messages').update({ is_read_by_customer: true }).eq('id', newMessage.id).then()
+        }
       })
       .subscribe()
 
