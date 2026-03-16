@@ -189,7 +189,13 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         .eq('phone', ph)
         .maybeSingle()
 
-      if (!cust) return
+      if (!cust) {
+        setCustomerId(null)
+        setCustomerPoints(0)
+        setAvailableCoupons([])
+        setAllMyCoupons([])
+        return
+      }
       setCustomerId(cust.id)
       setCustomerPoints(cust.points ?? 0)
 
