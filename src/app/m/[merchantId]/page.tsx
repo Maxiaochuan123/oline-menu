@@ -10,13 +10,16 @@ import {
   MapPin, Phone, User, Clock, Briefcase, UserRound, ArrowRight, Package, Gift, Star, ChevronRight
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { useToast } from '@/components/common/Toast'
 import WechatGuide from '@/components/customer/WechatGuide'
 import NewItemsCarousel from '@/components/customer/NewItemsCarousel'
+import MenuSkeleton from '@/components/customer/MenuSkeleton'
 
 export default function ClientMenuPage({ params }: { params: Promise<{ merchantId: string }> }) {
   const { merchantId } = use(params)
   const supabase = createClient()
   const router = useRouter()
+  const { toast } = useToast()
 
   const [merchant, setMerchant] = useState<Merchant | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -65,6 +68,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const [claimLoading, setClaimLoading] = useState<string | null>(null)
   // 是否由用户手动切换过优惠券（手动选过后不再自动覆盖）
   const [couponManuallySet, setCouponManuallySet] = useState(false)
+  const [formError, setFormError] = useState(false)
 
   const itemsRef = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -233,14 +237,14 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       })
       if (error) throw error
       if (success) {
-        alert(isAutoClaim ? `欢迎回来！为您自动领取了【${coupon.title}】` : '抢券成功！')
+        toast(isAutoClaim ? `欢迎回来！为您自动领取了【${coupon.title}】` : '抢券成功！', 'success')
         if (phone) loadCustomerBenefits(phone)
         loadData() // 刷新余量
       } else {
-        alert(isAutoClaim ? `【${coupon.title}】您已经领过或已被抢光啦` : '抢券失败：您可能已经领过，或者已经被抢完啦！')
+        toast(isAutoClaim ? `【${coupon.title}】您已经领过或已被抢光啦` : '抢券失败：您可能已经领过，或者已经被抢完啦！', 'warning')
       }
     } catch (err: unknown) {
-      alert('抢券异常: ' + (err instanceof Error ? err.message : String(err)))
+      toast('抢券异常: ' + (err instanceof Error ? err.message : String(err)), 'error')
     } finally {
       setClaimLoading(null)
     }
@@ -365,11 +369,12 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
   async function handleSubmitOrder() {
     if (!customerName || !phone || !address || !scheduledTime) {
-      alert('请填写完整的配送信息')
+      setFormError(true)
+      toast('请完善红色高亮的配送信息', 'warning')
       return
     }
     if (!isValidPhone(phone)) {
-      alert('请输入有效的手机号（1开头，11位数字）')
+      toast('手机号格式不正确', 'error')
       return
     }
     setSubmitting(true)
@@ -468,22 +473,19 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       
       // 显示成功仪式感动画
       setShowSuccessAnimation(true)
+      toast('下单成功，正在飞速为您备菜...', 'success')
       setTimeout(() => {
         router.push(`/m/${merchantId}/order/${order.id}`)
       }, 1500)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '下单失败'
-      alert(`下单失败: ${msg}`)
+      toast(`下单失败: ${msg}`, 'error')
     } finally {
       setSubmitting(false)
     }
   }
 
-  if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-      <span className="spinner" />
-    </div>
-  )
+  if (loading) return <MenuSkeleton />
 
   if (isWechatEnv) return <WechatGuide />
 
@@ -962,17 +964,31 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
                     <User size={14} /> 您的称呼
                   </label>
-                  <input className="input" placeholder="怎么称呼您？" value={customerName} onChange={e => setCustomerName(e.target.value)} />
+                  <input 
+                    className={`input ${formError && !customerName ? 'shake' : ''}`} 
+                    placeholder="怎么称呼您？" 
+                    value={customerName} 
+                    onChange={e => setCustomerName(e.target.value)} 
+                    style={{ border: formError && !customerName ? '1.5px solid #ef4444' : undefined, background: formError && !customerName ? '#fef2f2' : undefined }}
+                  />
                 </div>
                 <div>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
                     <Phone size={14} /> 联系手机
                   </label>
-                  <input className="input" type="tel" placeholder="重要：配送员将联系此号码" value={phone} onChange={e => {
-                    const v = e.target.value.replace(/\D/g, '').slice(0, 11)
-                    setPhone(v)
-                    if (v.length === 11) loadCustomerBenefits(v)
-                  }} maxLength={11} />
+                  <input 
+                    className={`input ${(formError && !phone) || (phone.length > 0 && !isValidPhone(phone)) ? 'shake' : ''}`} 
+                    type="tel" 
+                    placeholder="重要：配送员将联系此号码" 
+                    value={phone} 
+                    onChange={e => {
+                      const v = e.target.value.replace(/\D/g, '').slice(0, 11)
+                      setPhone(v)
+                      if (v.length === 11) loadCustomerBenefits(v)
+                    }} 
+                    maxLength={11} 
+                    style={{ border: (formError && !phone) || (phone.length > 0 && !isValidPhone(phone)) ? '1.5px solid #ef4444' : undefined, background: formError && !phone ? '#fef2f2' : undefined }}
+                  />
                   {phone.length > 0 && !isValidPhone(phone) && (
                     <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>请输入有效的手机号（1开头，11位数字）</p>
                   )}
@@ -981,13 +997,26 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
                     <Clock size={14} /> 预定时间
                   </label>
-                  <input className="input" type="datetime-local" value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} />
+                  <input 
+                    className={`input ${formError && !scheduledTime ? 'shake' : ''}`} 
+                    type="datetime-local" 
+                    value={scheduledTime} 
+                    onChange={e => setScheduledTime(e.target.value)} 
+                    style={{ border: formError && !scheduledTime ? '1.5px solid #ef4444' : undefined, background: formError && !scheduledTime ? '#fef2f2' : undefined }}
+                  />
                 </div>
                 <div>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
                     <MapPin size={14} /> 详细地址
                   </label>
-                  <textarea className="input" placeholder="请输入您的详细配送地址..." rows={2} value={address} onChange={e => setAddress(e.target.value)} />
+                  <textarea 
+                    className={`input ${formError && !address ? 'shake' : ''}`} 
+                    placeholder="请输入您的详细配送地址..." 
+                    rows={2} 
+                    value={address} 
+                    onChange={e => setAddress(e.target.value)} 
+                    style={{ border: formError && !address ? '1.5px solid #ef4444' : undefined, background: formError && !address ? '#fef2f2' : undefined }}
+                  />
                 </div>
               </div>
 
@@ -1096,7 +1125,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 marginTop: '16px', padding: '12px', background: '#fef2f2', 
                 borderRadius: '8px', color: '#dc2626', fontSize: '12px' 
               }}>
-                <strong>取消规则：</strong> 下单后 30 分钟内可免费取消。超出 30 分钟后按小时收取 2% 违约金（封顶 10%）
+                <strong>取消规则：</strong> 商家接单后 3 分钟内可极速免责取消。超出 3 分钟后将根据制作时长收取 5%-80% 的食材损耗费。
               </div>
             </div>
 
@@ -1414,16 +1443,16 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                         
                         // 如果即便凑够了也没法多省钱
                         if (!isBetterOrStackable && currentNonStackableAmount > 0) {
-                          alert(`【${uc.coupon?.title}】不可与当前已选优惠券叠加使用，即便凑满门槛，优惠总额也不会增加哦。`)
+                          toast(`该券不可与当前券叠加，凑满也无法增加优惠`, 'info')
                           return
                         }
 
                         if (eligibleAmount === 0 && isTargeted) {
-                          alert(`您还未添加【${uc.coupon?.title}】指定的商品，无法使用此券`)
+                          toast(`未添加该券指定商品`, 'warning')
                         } else if (totalAmount >= minSpend && isTargeted) {
-                          alert(`【${uc.coupon?.title}】仅限指定商品参加，目前指定商品还差 ¥${gap.toFixed(0)}（需满 ¥${minSpend}）`)
+                          toast(`指定商品还差 ¥${gap.toFixed(0)}`, 'warning')
                         } else {
-                          alert(`目前还差 ¥${gap.toFixed(0)} 即可使用此券（满 ¥${minSpend} 可用）`)
+                          toast(`还差 ¥${gap.toFixed(0)} 即可使用`, 'info')
                         }
                         return
                       }

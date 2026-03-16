@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { AlertTriangle, CheckCircle, ChevronRight, X, Send, MessageSquare } from 'lucide-react'
 import Image from 'next/image'
+import { useToast } from '@/components/common/Toast'
 import { formatPrice } from '@/lib/utils'
 import { calculateCancellationPenalty } from '@/lib/order'
 import OrderItemsCard from '@/components/OrderItemsCard'
@@ -29,6 +30,7 @@ export default function OrderManagerModal({
   onSuccess: () => void 
 }) {
   const supabase = createClient()
+  const { toast } = useToast()
   // 连表后结构：OrderItem & { menu_items: { category_id: string } | null }
   const [orderItems, setOrderItems] = useState<({
     id: string; order_id: string; menu_item_id: string; item_name: string;
@@ -251,8 +253,8 @@ export default function OrderManagerModal({
 
   async function handleConfirmRefund() {
     const amt = currentRefundTotal()
-    if (amt <= 0) return alert('退款金额必须大于 0')
-    if (amt > Number(order.total_amount)) return alert('退款金额不能大于订单实付额')
+    if (amt <= 0) return toast('退款金额必须大于 0', 'warning')
+    if (amt > Number(order.total_amount)) return toast('退款金额不能大于订单实付额', 'error')
     if (!window.confirm(`确认同意售后？将会退款：${formatPrice(amt)} 给客户`)) return
 
     const isFullRefund = amt >= Number(order.total_amount)
@@ -269,7 +271,7 @@ export default function OrderManagerModal({
     const { error } = await supabase.from('orders').update(updatePayload).eq('id', order.id)
 
     if (error) {
-      alert('处理失败')
+      toast('处理失败', 'error')
     } else {
       // 1. 退还勾选的优惠券
       if (hasCouponRefund && order.customer_id) {
@@ -298,6 +300,7 @@ export default function OrderManagerModal({
         usedCoupons.filter(c => selectedCouponRefundIds.has(c.id)).map(c => c.title).join('、')
       } 共 ${selectedCouponRefundIds.size} 张优惠券)` : ''
       await sendAfterSalesMessage(`商家已同意退款并完结本单售后（退款金额：${formatPrice(amt)}）${extInfo}\n祝您生活愉快~`, true)
+      toast('售后处理成功', 'success')
       onSuccess()
       onClose()
     }
@@ -328,8 +331,9 @@ export default function OrderManagerModal({
     }).eq('id', order.id)
 
     if (error) {
-      alert('取消失败')
+      toast('取消失败', 'error')
     } else {
+      toast('订单已成功取消', 'success')
       // 1. 退还本单使用的所有优惠券
       const couponIds: string[] = order.coupon_ids ?? []
       if (order.customer_id) {
