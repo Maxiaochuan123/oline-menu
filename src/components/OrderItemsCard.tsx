@@ -1,6 +1,6 @@
 'use client'
 
-import { formatPrice } from '@/lib/utils'
+import { formatPrice, cn } from '@/lib/utils'
 
 export interface OrderItemData {
   id: string
@@ -69,98 +69,113 @@ export default function OrderItemsCard({
   refundResolved = false,
   penaltyRate,
   penaltyAmount,
-  totalColor = '#f59e0b',
+  totalColor = 'text-orange-500', // 改为传类名
 }: Props) {
   return (
-    <>
+    <div className="space-y-4 font-sans">
       {/* 标题 */}
       {titleAsHeading ? (
-        <h3 style={{ fontSize: '15px', fontWeight: '800', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #f5f5f4' }}>
+        <h3 className="text-base font-black pb-3 border-b border-slate-100 text-slate-800 tracking-tight">
           {title}
         </h3>
       ) : (
-        <strong style={{ fontSize: '14px' }}>{title}：</strong>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-1 h-3.5 bg-orange-500 rounded-full" />
+          <span className="text-[15px] font-black text-slate-800 tracking-tight">{title}</span>
+        </div>
       )}
 
       {/* 菜品列表 */}
-      {items.map(item => (
-        <div
-          key={item.id}
-          style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', padding: titleAsHeading ? '0 0 12px' : '4px 0' }}
-        >
-          <span>
-            {item.item_name} x{item.quantity}
-            {showRemark && item.remark ? ` (${item.remark})` : ''}
-          </span>
-          <span style={{ fontWeight: titleAsHeading ? '600' : undefined }}>
-            {formatPrice(item.item_price * item.quantity)}
-          </span>
-        </div>
-      ))}
+      <div className="space-y-2">
+        {items.map(item => (
+          <div
+            key={item.id}
+            className={cn(
+              "flex justify-between text-sm transition-colors hover:bg-slate-50 rounded-lg py-1 px-1 -mx-1",
+              titleAsHeading ? "pb-3" : "py-1"
+            )}
+          >
+            <div className="flex flex-col">
+              <span className="text-slate-700 font-medium">
+                {item.item_name} <span className="text-slate-400 font-bold ml-1">x{item.quantity}</span>
+              </span>
+              {showRemark && item.remark && (
+                <span className="text-[11px] text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded mt-1 w-fit font-bold animate-pulse">
+                  备注: {item.remark}
+                </span>
+              )}
+            </div>
+            <span className={cn("text-slate-900 font-black", titleAsHeading ? "text-base" : "text-sm tabular-nums")}>
+              {formatPrice(item.item_price * item.quantity)}
+            </span>
+          </div>
+        ))}
+      </div>
 
       {/* 优惠券明细 */}
       {usedCoupons.length > 0 && couponDiscountAmount > 0 && (
-        <div style={{ borderTop: '1px dashed #e5f0ff', marginTop: '6px', paddingTop: '6px' }}>
-          {usedCoupons.map((coupon, idx) => (
+        <div className="pt-3 border-t border-dashed border-blue-100 space-y-2">
+          {usedCoupons.map((coupon) => (
             <div
               key={coupon.id}
-              style={{
-                display: 'flex', justifyContent: 'space-between',
-                fontSize: '13px', padding: '3px 0', color: '#3b82f6',
-                marginBottom: idx < usedCoupons.length - 1 ? '2px' : 0
-              }}
+              className="flex justify-between items-center text-[13px] text-blue-600 font-medium bg-blue-50/50 px-2 py-1.5 rounded-lg border border-blue-100/50"
             >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                🏷️ {coupon.title}
+              <span className="flex items-center gap-1.5">
+                <span className="text-xs">🏷️</span> {coupon.title}
               </span>
-              <span style={{ fontWeight: '600' }}>-{formatPrice(coupon.amount)}</span>
+              <span className="font-black tabular-nums">-{formatPrice(coupon.amount)}</span>
             </div>
           ))}
           {usedCoupons.length > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6b7280', paddingTop: '4px', marginTop: '2px', borderTop: '1px dashed #e5e7eb' }}>
+            <div className="flex justify-between items-center pt-2 px-2 text-[11px] text-blue-500 font-bold">
               <span>共优惠</span>
-              <span style={{ fontWeight: '600', color: '#3b82f6' }}>-{formatPrice(couponDiscountAmount)}</span>
+              <span className="tabular-nums">-{formatPrice(couponDiscountAmount)}</span>
             </div>
           )}
         </div>
       )}
 
       {/* 实付合计 */}
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #e5e7eb',
-        fontWeight: '700', fontSize: titleAsHeading ? '15px' : '16px'
-      }}>
-        <span>实付合计</span>
-        <span style={{ fontSize: titleAsHeading ? '20px' : '16px', color: totalColor }}>
-          {formatPrice(totalAmount)}
-        </span>
+      <div className="pt-4 border-t border-dashed border-slate-200">
+        <div className="flex justify-between items-end">
+          <span className="text-sm font-bold text-slate-500 pb-0.5">实付合计</span>
+          <span className={cn(
+            "font-black tracking-tighter tabular-nums",
+            titleAsHeading ? "text-2xl" : "text-xl",
+            totalColor === 'var(--color-primary)' || totalColor === '#f59e0b' ? "text-orange-600" : totalColor
+          )}>
+            {formatPrice(totalAmount)}
+          </span>
+        </div>
       </div>
 
       {/* 违约金明细（取消订单有违约时显示） */}
       {!!penaltyRate && penaltyRate > 0 && !!penaltyAmount && penaltyAmount > 0 && (
-        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #fecaca' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#ef4444' }}>
-            <span>违约金 ({(penaltyRate * 100).toFixed(0)}%)</span>
-            <span style={{ fontWeight: '700' }}>-{formatPrice(penaltyAmount)}</span>
+        <div className="pt-3 border-t border-dashed border-red-100 space-y-2">
+          <div className="flex justify-between items-center text-xs text-red-500 font-bold">
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+              违约金 ({(penaltyRate * 100).toFixed(0)}%)
+            </span>
+            <span className="tabular-nums">-{formatPrice(penaltyAmount)}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '14px', fontWeight: '800' }}>
-            <span>实际退款</span>
-            <span style={{ color: '#22c55e' }}>{formatPrice(Math.max(0, totalAmount - penaltyAmount))}</span>
+          <div className="flex justify-between items-center text-sm font-black bg-red-50 text-red-600 px-3 py-2 rounded-xl">
+            <span>实际退款额</span>
+            <span className="text-base tabular-nums">{formatPrice(Math.max(0, totalAmount - penaltyAmount))}</span>
           </div>
         </div>
       )}
 
       {/* 售后退款（售后处理后展示） */}
       {refundResolved && refundAmount && (
-        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #eee' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#dc2626' }}>
+        <div className="pt-3 border-t border-dashed border-slate-200 space-y-2">
+          <div className="flex justify-between items-center text-[11px] text-red-400 font-bold px-2">
             <span>售后退款</span>
-            <span style={{ fontWeight: '700' }}>-{formatPrice(Number(refundAmount))}</span>
+            <span className="tabular-nums">-{formatPrice(Number(refundAmount))}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '14px', fontWeight: '800' }}>
-            <span>实际支付</span>
-            <span style={{ color: 'var(--color-primary)' }}>
+          <div className="flex justify-between items-center text-sm font-black bg-slate-900 text-white px-3 py-2 rounded-xl shadow-sm">
+            <span>实际结算支付</span>
+            <span className="text-base tracking-tight tabular-nums font-mono">
               {formatPrice(Math.max(0, totalAmount - Number(refundAmount)))}
             </span>
           </div>
@@ -168,9 +183,9 @@ export default function OrderItemsCard({
       )}
 
       {/* 下单时间 */}
-      <div style={{ fontSize: '12px', color: '#999', marginTop: '12px', textAlign: 'right' }}>
-        下单时间：{new Date(createdAt).toLocaleString('zh-CN')}
+      <div className="text-[10px] text-slate-400 font-bold text-right pt-2 italic">
+        下单时间 · {new Date(createdAt).toLocaleString('zh-CN', { hour12: false })}
       </div>
-    </>
+    </div>
   )
 }

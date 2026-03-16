@@ -2,14 +2,41 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { AlertTriangle, CheckCircle, ChevronRight, X, Send, MessageSquare } from 'lucide-react'
+import { AlertTriangle, CheckCircle, ChevronRight, Send, MessageSquare } from 'lucide-react'
 import Image from 'next/image'
 import { useToast } from '@/components/common/Toast'
-import { formatPrice } from '@/lib/utils'
+import { formatPrice, cn } from '@/lib/utils'
 import { calculateCancellationPenalty } from '@/lib/order'
 import OrderItemsCard from '@/components/OrderItemsCard'
 import type { UsedCoupon } from '@/components/OrderItemsCard'
 import type { Order, Message } from '@/lib/types'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Separator } from "@/components/ui/separator"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '待处理',
@@ -17,6 +44,13 @@ const STATUS_LABELS: Record<string, string> = {
   delivering: '配送中',
   completed: '已完成',
   cancelled: '已取消'
+}
+const STATUS_COLORS: Record<string, string> = {
+  pending: "bg-amber-100 text-amber-700 border-amber-200",
+  preparing: "bg-blue-100 text-blue-700 border-blue-200",
+  delivering: "bg-purple-100 text-purple-700 border-purple-200",
+  completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  cancelled: "bg-zinc-100 text-zinc-700 border-zinc-200",
 }
 const STATUS_FLOW = ['pending', 'preparing', 'delivering', 'completed']
 
@@ -55,10 +89,41 @@ export default function OrderManagerModal({
   const [asMsgText, setAsMsgText] = useState('')
   const [sendingAsMsg, setSendingAsMsg] = useState(false)
   const msgBoxRef = useRef<HTMLDivElement>(null)
+  const modalBodyRef = useRef<HTMLDivElement>(null)
+  const endOfMessagesRef = useRef<HTMLDivElement>(null)
+
+
+  const isInitialMount = useRef(true)
+
+  useEffect(() => {
+    if (order) {
+      isInitialMount.current = true
+      // 强制复位主视图到顶部 (使用微延时对抗子组件初始化造成的强制拉动)
+      setTimeout(() => {
+        if (modalBodyRef.current) {
+          modalBodyRef.current.scrollTop = 0
+        }
+      }, 50)
+    }
+  }, [order])
 
   useEffect(() => {
     if (msgBoxRef.current) {
-      msgBoxRef.current.scrollTop = msgBoxRef.current.scrollHeight
+      const viewport = msgBoxRef.current.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement
+      if (viewport) {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (isInitialMount.current) {
+              // 初次夹带加载使用暴力原生重置，对抗浏览器的原生焦点跳转
+              viewport.scrollTop = viewport.scrollHeight
+              isInitialMount.current = false
+            } else {
+              // 补充新消息时使用行为平滑
+              viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+            }
+          }, 0)
+        })
+      }
     }
   }, [messages])
 
@@ -379,456 +444,495 @@ export default function OrderManagerModal({
 
   if (!order) return null
 
+  const idx = STATUS_FLOW.indexOf(order.status)
+  const nextStatus = STATUS_FLOW[idx + 1]
+
   return (
     <>
-      <div className="overlay" style={{ zIndex: 50 }} onClick={onClose} />
-      <div className="dialog" style={{ zIndex: 60 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3 style={{ fontWeight: '700' }}>订单详情</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
-        </div>
+      <Dialog open={!!order} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent 
+          className="sm:max-w-[550px] w-[95vw] max-h-[90vh] flex flex-col p-0 overflow-hidden gap-0 border-none shadow-2xl rounded-2xl bg-white ring-1 ring-black/5 font-sans"
+        >
+          {/* Header */}
+          <DialogHeader className="px-5 py-3 border-b flex-shrink-0 bg-white sticky top-0 z-10">
+            <div className="flex items-center gap-3">
+              <DialogTitle className="text-lg font-black text-slate-800 tracking-tight">订单详情</DialogTitle>
+              <Badge variant="outline" className={cn("px-2.5 py-0.5 font-black text-[10px] tracking-wide uppercase border-2", STATUS_COLORS[order.status])}>
+                {STATUS_LABELS[order.status]}
+              </Badge>
+            </div>
+          </DialogHeader>
 
-        {order.after_sales_status === 'pending' && (
-           <div className={(order.after_sales_urge_count || 0) > 0 ? "urgent-panel-pulse" : ""} style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontWeight: 'bold', marginBottom: '4px', fontSize: '14px' }}>
-               <AlertTriangle size={16} /> 售后待处理 {(order.after_sales_urge_count || 0) > 0 && `(客户已催处理 ${order.after_sales_urge_count} 次)`}
-             </div>
-             <div style={{ fontSize: '13px', color: '#7f1d1d', marginBottom: '10px' }}>
-               <strong>顾客缘由：</strong>{order.after_sales_reason}
-             </div>
-             {order.after_sales_items && order.after_sales_items.length > 0 && (
-               <div style={{ fontSize: '12px', color: '#b91c1c', marginBottom: '10px', background: 'white', padding: '6px', borderRadius: '4px' }}>
-                 <strong>不满意菜品：</strong>
-                 {orderItems.filter(i => order.after_sales_items?.includes(i.id)).map(i => i.item_name).join('、')}
-               </div>
-             )}
-             {order.after_sales_images && order.after_sales_images.length > 0 && (
-               <div style={{ marginBottom: '10px' }}>
-                 <strong style={{ fontSize: '12px', color: '#b91c1c', display: 'block', marginBottom: '4px' }}>凭证照片：</strong>
-                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {order.after_sales_images.map((url: string, idx: number) => (
-                      <div 
-                        key={idx} 
-                        style={{ position: 'relative', width: '60px', height: '60px', border: '1px solid #fca5a5', borderRadius: '4px', overflow: 'hidden', cursor: 'pointer' }}
-                        onClick={() => window.open(url, '_blank')}
-                      >
-                        <Image 
-                          src={url} 
-                          alt="凭证" 
-                          fill 
-                          unoptimized 
-                          style={{ objectFit: 'cover' }} 
-                        />
+          {/* Body */}
+          <div 
+            ref={modalBodyRef}
+            className="flex-1 overflow-y-auto bg-slate-50/40 custom-scrollbar p-0"
+          >
+            <div className="p-6 space-y-6">
+              {/* --- 售后待处理区 --- */}
+              {order.after_sales_status === 'pending' && (
+                <Alert variant="destructive" className={cn(
+                  "border-red-200 bg-red-50/80 shadow-sm",
+                  (order.after_sales_urge_count || 0) > 0 && "urgent-panel-pulse"
+                )}>
+                  <AlertTriangle size={18} className="text-red-600" />
+                  <AlertTitle className="text-red-700 font-bold mb-1">
+                    售后待处理 {(order.after_sales_urge_count || 0) > 0 && `(客户已催处理 ${order.after_sales_urge_count} 次)`}
+                  </AlertTitle>
+                  <AlertDescription className="space-y-3">
+                    <p className="text-red-800 text-sm"><strong>顾客缘由：</strong>{order.after_sales_reason}</p>
+                    
+                    {order.after_sales_items && order.after_sales_items.length > 0 && (
+                      <div className="text-xs text-red-700 bg-white/60 p-2 rounded border border-red-100">
+                        <strong>不满意菜品：</strong>
+                        {orderItems.filter(i => order.after_sales_items?.includes(i.id)).map(i => i.item_name).join('、')}
                       </div>
-                    ))}
-                 </div>
-               </div>
-             )}
-             <button 
-               className="btn btn-primary btn-block btn-sm" 
-               style={{ background: '#ef4444', borderColor: '#ef4444' }}
-               onClick={() => {
-                // 自动计算系统建议的违约金与退款额 (新功能：保护商家利益)
-                const res = calculateCancellationPenalty(order)
-                const penaltyAmt = Number(order.total_amount) * res.rate
-                const finalAmt = Math.max(0, Number(order.total_amount) - penaltyAmt)
-                
-                setSuggestedRefund({
-                  rate: res.rate,
-                  amount: penaltyAmt,
-                  final: finalAmt,
-                  reason: res.reason
-                })
-                
-                // 自动预填到输入框
-                setRefundInput(finalAmt.toString())
-                setRefundMode('fixed')
-                setShowRefundPanel(true)
-              }}
-             >去处理退款/驳回</button>
-           </div>
-        )}
-        {order.after_sales_status === 'resolved' && (
-           <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontSize: '13px', fontWeight: 'bold', marginBottom: '8px' }}>
-               <CheckCircle size={16} /> 已完结售后
-             </div>
-             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#374151', marginBottom: '4px' }}>
-               <span>退款金额</span>
-               <span style={{ fontWeight: '700', color: '#166534' }}>{formatPrice(Number(order.refund_amount))}</span>
-             </div>
-             {(order.coupon_ids?.length ?? 0) > 0 && order.is_coupon_refunded && (
-               <div style={{ marginTop: '8px', padding: '8px 10px', background: '#dcfce7', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid #bbf7d0' }}>
-                 <span>🏷️</span>
-                 <div>
-                   <div style={{ fontSize: '12px', fontWeight: '700', color: '#15803d' }}>已同时退还优惠券</div>
-                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>
-                      {usedCoupons.length > 0 ? usedCoupons.map(c => c.title).join(' + ') : '优惠券'}
-                      （抵扣 {formatPrice(Number(order.coupon_discount_amount || 0))}）
-                    </div>
-                 </div>
-               </div>
-             )}
-           </div>
-        )}
-
-        <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
-          <span className={`tag tag-${order.order_type === 'personal' ? 'personal' : 'company'}`}>
-            {order.order_type === 'personal' ? '个人' : '公司'}
-          </span>
-          <span className={`tag tag-status tag-${order.status}`}>{STATUS_LABELS[order.status]}</span>
-        </div>
-        <div style={{ fontSize: '14px', lineHeight: '2' }}>
-          <div><strong>客户：</strong>{order.customer_name}</div>
-          <div><strong>电话：</strong>{order.phone}</div>
-          <div><strong>地址：</strong>{order.address}</div>
-          <div><strong>预定时间：</strong>{new Date(order.scheduled_time).toLocaleString('zh-CN')}</div>
-        </div>
-        <div style={{ margin: '12px 0', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
-          <OrderItemsCard
-            title="菜品明细"
-            titleAsHeading={false}
-            items={orderItems}
-            showRemark
-            usedCoupons={usedCoupons}
-            couponDiscountAmount={Number(order.coupon_discount_amount)}
-            totalAmount={Number(order.total_amount)}
-            createdAt={order.created_at}
-            penaltyRate={order.penalty_rate}
-            penaltyAmount={order.penalty_amount}
-            totalColor="#f59e0b"
-          />
-        </div>
-
-        {/* --- 统一客户沟通记录区 (P12-D 升级版) --- */}
-        <div style={{ marginTop: '16px', background: '#f9fafb', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e5e7eb' }}>
-          <div style={{ padding: '10px 12px', background: '#f3f4f6', borderBottom: '1px solid #e5e7eb', fontSize: '13px', fontWeight: 'bold', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <MessageSquare size={16} color="var(--color-primary)" /> 客户留言与评价沟通记录
-          </div>
-          <div ref={msgBoxRef} style={{ padding: '12px 14px', maxHeight: '240px', overflowY: 'auto' }}>
-            {messages.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: '13px', padding: '10px 0' }}>暂无沟通记录</div>
-            ) : messages.map(msg => {
-              const isMerc = msg.sender === 'merchant'
-              const isAfterSales = msg.msg_type === 'after_sales'
-              const isClosed = msg.msg_type === 'after_sales_closed'
-
-              return (
-                <div key={msg.id} style={{
-                  display: 'flex',
-                  justifyContent: isMerc ? 'flex-end' : 'flex-start',
-                  marginBottom: '10px',
-                }}>
-                  <div style={{ maxWidth: '85%' }}>
-                    {msg.sender === 'customer' && msg.rating && (
-                       <div style={{ fontSize: '12px', color: '#f59e0b', fontWeight: '600', marginBottom: '4px' }}>客户评价了 {msg.rating} 星 ⭐</div>
                     )}
-                    <div style={{
-                      padding: '8px 12px',
-                      borderRadius: isMerc ? '14px 4px 14px 14px' : '4px 14px 14px 14px',
-                      background: isAfterSales ? (isMerc ? '#fecaca' : '#fee2e2') : (isMerc ? 'var(--color-primary)' : 'white'),
-                      color: isAfterSales ? (isMerc ? '#7f1d1d' : '#991b1b') : (isMerc ? 'white' : '#1c1917'),
-                      border: isMerc ? 'none' : '1px solid #e5e7eb',
-                      fontSize: '14px', lineHeight: '1.5',
-                      whiteSpace: 'pre-wrap', wordBreak: 'break-all'
-                    }}>
-                      {isAfterSales && !isMerc && <div style={{ fontSize: '12px', fontWeight: '800', marginBottom: '4px', opacity: 0.9 }}>🚨 发起售后争议</div>}
-                      {isClosed && <div style={{ fontSize: '12px', fontWeight: '800', marginBottom: '4px', color: '#10b981' }}>✅ 纠纷已完结</div>}
-                      {msg.content}
+
+                    {order.after_sales_images && order.after_sales_images.length > 0 && (
+                      <div className="flex gap-2 flex-wrap">
+                        {order.after_sales_images.map((url: string, idx: number) => (
+                          <div 
+                            key={idx} 
+                            className="relative size-14 border border-red-200 rounded-md overflow-hidden cursor-zoom-in hover:brightness-90 transition-all"
+                            onClick={() => window.open(url, '_blank')}
+                          >
+                            <Image src={url} alt="凭证" fill unoptimized className="object-cover" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    <Button 
+                      variant="destructive" 
+                      className="w-full h-9 shadow-sm font-bold"
+                      onClick={async () => {
+                        const res = calculateCancellationPenalty(order)
+                        const penaltyAmt = Number(order.total_amount) * res.rate
+                        const finalAmt = Math.max(0, Number(order.total_amount) - penaltyAmt)
+
+                        // 自动发送协商引导消息
+                        const msg = `商家已收到您的售后申请。按规定当前退单需扣除违约金 ${formatPrice(penaltyAmt)} (${res.reason})，实退金额约为 ${formatPrice(finalAmt)}，不过您可以与我协商调整。`
+                        await sendAfterSalesMessage(msg)
+
+                        setSuggestedRefund({ rate: res.rate, amount: penaltyAmt, final: finalAmt, reason: res.reason })
+                        setRefundInput(finalAmt.toString())
+                        setRefundMode('fixed')
+                        setShowRefundPanel(true)
+                      }}
+                    >
+                      去处理退款/驳回
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* --- 售后已完结区 --- */}
+              {order.after_sales_status === 'resolved' && (
+                <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 shadow-sm text-sm font-medium">
+                  <div className="flex items-center gap-2 text-emerald-700 font-black mb-3 text-base">
+                    <CheckCircle size={18} /> 已完结售后
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600">已退款金额</span>
+                    <span className="text-lg font-black text-emerald-600 font-mono tracking-tighter">{formatPrice(Number(order.refund_amount))}</span>
+                  </div>
+                  {order.is_coupon_refunded && (
+                    <div className="mt-3 p-3 bg-white/60 border border-emerald-200 rounded-xl flex gap-3 items-center">
+                      <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-none px-2 py-0.5 font-black">🏷️ 优惠券已退</Badge>
+                      <div className="text-xs text-emerald-600 truncate flex-1 font-bold">
+                        {usedCoupons.length > 0 ? usedCoupons.map(c => c.title).join(' + ') : '优惠券'} (抵扣 {formatPrice(Number(order.coupon_discount_amount || 0))})
+                      </div>
                     </div>
-                    <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px', textAlign: isMerc ? 'right' : 'left' }}>
-                      {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                      {!isMerc && <span style={{ marginLeft: '4px', color: '#f59e0b', fontWeight: '600' }}>客户</span>}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <div style={{ padding: '10px', background: 'white', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '8px' }}>
-            <input
-              value={asMsgText}
-              onChange={e => setAsMsgText(e.target.value)}
-              placeholder="发送消息..."
-              style={{
-                flex: 1, border: '1px solid var(--color-border)',
-                borderRadius: '16px', padding: '8px 14px',
-                fontSize: '14px', outline: 'none', background: '#fafafa'
-              }}
-              onKeyDown={e => {
-                if (e.key === 'Enter') sendAfterSalesMessage()
-              }}
-            />
-            <button
-              onClick={() => sendAfterSalesMessage()}
-              disabled={sendingAsMsg || !asMsgText.trim()}
-              className="btn btn-primary"
-              style={{ height: '36px', width: '36px', padding: 0, borderRadius: '50%', flexShrink: 0 }}
-            >
-              <Send size={16} />
-            </button>
-          </div>
-        </div>
-
-        {/* --- 订单全局底部操作栏 --- */}
-        {!['completed', 'cancelled'].includes(order.status) && (
-          <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-            <button onClick={() => setShowCancel(true)} className="btn btn-danger btn-sm" style={{ flex: 1 }}>取消订单</button>
-            <button 
-              onClick={() => requestStatusUpdate()} 
-              className="btn btn-primary" 
-              style={{ 
-                flex: 2,
-                opacity: order.after_sales_status === 'pending' ? 0.5 : 1,
-                filter: order.after_sales_status === 'pending' ? 'grayscale(0.5)' : 'none',
-                cursor: order.after_sales_status === 'pending' ? 'not-allowed' : 'pointer'
-              }}
-              disabled={order.after_sales_status === 'pending'}
-            >
-              {order.after_sales_status === 'pending' ? '请先处理售后' : (STATUS_LABELS[STATUS_FLOW[STATUS_FLOW.indexOf(order.status) + 1]] || '')}
-              {order.after_sales_status !== 'pending' && <ChevronRight size={14} />}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* 取消确认弹窗 */}
-      {showCancel && (
-        <>
-          <div className="overlay" style={{ zIndex: 70 }} onClick={() => setShowCancel(false)} />
-          <div className="dialog" style={{ zIndex: 80 }}>
-            <div style={{ textAlign: 'center' }}>
-              <AlertTriangle size={48} color="#ef4444" style={{ margin: '0 auto 12px' }} />
-              <h3 style={{ fontWeight: '700', marginBottom: '8px' }}>确认取消订单？</h3>
-              <p style={{ fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-                商家取消订单将全额退款给客户，此操作不可撤销。
-              </p>
-              <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
-                <button onClick={() => setShowCancel(false)} className="btn btn-outline" style={{ flex: 1 }}>再想想</button>
-                <button onClick={cancelOrder} className="btn btn-danger" style={{ flex: 1 }}>确认取消</button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* 售后与退款面板 */}
-      {showRefundPanel && (
-        <>
-          <div className="overlay" style={{ zIndex: 90 }} onClick={() => setShowRefundPanel(false)} />
-          <div className="dialog" style={{ zIndex: 100 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontWeight: '800' }}>协商退款控制台</h3>
-              <button onClick={() => setShowRefundPanel(false)} style={{ background: 'none', border: 'none' }}><X size={20} /></button>
-            </div>
-            
-            <div style={{ marginBottom: '16px', background: '#f8f9fa', padding: '12px', borderRadius: '8px', fontSize: '13px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <span style={{ color: '#666' }}>订单总额</span>
-                <span style={{ fontWeight: '800' }}>{formatPrice(Number(order.total_amount))}</span>
-              </div>
-              {suggestedRefund && suggestedRefund.rate > 0 && (
-                <div style={{ padding: '8px', background: '#fff7ed', borderRadius: '6px', marginTop: '6px', border: '1px dashed #fed7aa' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ea580c', fontWeight: '700', fontSize: '12px' }}>
-                    <span>系统建议扣除损耗 ({(suggestedRefund.rate * 100).toFixed(0)}%)</span>
-                    <span>-{formatPrice(suggestedRefund.amount)}</span>
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#9a3412', marginTop: '4px', opacity: 0.8 }}>
-                    原因：{suggestedRefund.reason}
-                  </div>
-                  <div style={{ 
-                    marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #fed7aa',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                  }}>
-                    <span style={{ fontWeight: '700' }}>建议退款金额</span>
-                    <span style={{ fontSize: '15px', fontWeight: '800', color: '#ea580c' }}>{formatPrice(suggestedRefund.final)}</span>
-                  </div>
+                  )}
                 </div>
               )}
-            </div>
 
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', borderBottom: '1px solid #eee', paddingBottom: '12px' }}>
-              <button className={`btn btn-sm ${refundMode === 'fixed' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setRefundMode('fixed')}>按金额</button>
-              <button className={`btn btn-sm ${refundMode === 'ratio' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setRefundMode('ratio')}>按比例</button>
-              <button className={`btn btn-sm ${refundMode === 'items' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setRefundMode('items')}>按菜品</button>
-            </div>
-
-            {refundMode === 'fixed' && (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '6px' }}>输入一口价退款金额 (最多可退款 {formatPrice(Number(order.total_amount))})</label>
-                <input type="number" className="input" placeholder={`最多: ${order.total_amount}`} value={refundInput} onChange={e => setRefundInput(e.target.value)} />
-              </div>
-            )}
-
-            {refundMode === 'ratio' && (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: '#666', marginBottom: '6px' }}>输入退款比例 (%) 比如 50 表示退款一半</label>
-                <input type="number" className="input" placeholder="0 - 100" value={refundInput} onChange={e => setRefundInput(e.target.value)} />
-              </div>
-            )}
-
-            {refundMode === 'items' && (
-              <div style={{ marginBottom: '16px', maxHeight: '200px', overflowY: 'auto', border: '1px solid #eee', borderRadius: '8px', padding: '8px' }}>
-                {orderItems.map(item => {
-                  const currentQty = selectedRefundItems[item.id] || 0
-                  return (
-                    <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 4px', borderBottom: '1px solid #f9fafb', fontSize: '14px' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', flex: 1 }}>
-                        <input 
-                          type="checkbox" 
-                          checked={currentQty > 0}
-                          onChange={(e) => {
-                            setSelectedRefundItems(prev => ({
-                              ...prev,
-                              [item.id]: e.target.checked ? item.quantity : 0
-                            }))
-                          }}
-                        />
-                        <div>{item.item_name} (原买: {item.quantity})</div>
-                      </label>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #ddd', borderRadius: '4px', background: '#fff' }}>
-                          <button 
-                            style={{ padding: '2px 8px', border: 'none', background: 'transparent', cursor: currentQty <= 1 ? 'not-allowed' : 'pointer', color: currentQty <= 1 ? '#ccc' : '#333' }}
-                            disabled={currentQty <= 1}
-                            onClick={() => setSelectedRefundItems(p => ({ ...p, [item.id]: p[item.id] - 1 }))}
-                          >-</button>
-                          <span style={{ fontSize: '13px', padding: '0 8px', minWidth: '24px', textAlign: 'center' }}>{currentQty}</span>
-                          <button 
-                            style={{ padding: '2px 8px', border: 'none', background: 'transparent', cursor: currentQty >= item.quantity ? 'not-allowed' : 'pointer', color: currentQty >= item.quantity ? '#ccc' : '#333' }}
-                            disabled={currentQty >= item.quantity}
-                            onClick={() => setSelectedRefundItems(p => ({ ...p, [item.id]: (p[item.id] || 0) + 1 }))}
-                          >+</button>
-                        </div>
-                        <div style={{ fontWeight: '600', minWidth: '60px', textAlign: 'right' }}>{formatPrice(item.item_price * currentQty)}</div>
+              {/* --- 基础资料区 --- */}
+              <Card className="border-none shadow-sm overflow-hidden bg-white ring-1 ring-black/5 py-0">
+                <CardContent className="p-5 space-y-4">
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] uppercase tracking-widest text-slate-400 font-black">客户姓名</Label>
+                      <p className="text-sm font-black text-slate-900">{order.customer_name}</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] uppercase tracking-widest text-slate-400 font-black">联系电话</Label>
+                      <p className="text-sm font-black text-slate-900">{order.phone}</p>
+                    </div>
+                    <div className="col-span-2 space-y-1.5 pt-1">
+                      <Label className="text-[11px] uppercase tracking-widest text-slate-400 font-black">配送地址</Label>
+                      <p className="text-sm font-semibold text-slate-700 leading-relaxed bg-slate-50/80 p-2.5 rounded-xl border border-slate-100/50">{order.address}</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] uppercase tracking-widest text-slate-400 font-black">预约送达</Label>
+                      <p className="text-sm font-bold text-orange-600">{new Date(order.scheduled_time).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] uppercase tracking-widest text-slate-400 font-black">用户身份</Label>
+                      <div className="flex gap-2">
+                         <Badge variant="secondary" className={cn("text-[10px] px-2 py-0.5 rounded-md", order.order_type === 'personal' ? "bg-blue-100 text-blue-700 border-none font-black" : "bg-purple-100 text-purple-700 border-none font-black")}>
+                           {order.order_type === 'personal' ? '个人用餐' : '企业商务'}
+                         </Badge>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-            )}
+                  </div>
+                  
+                  <Separator className="bg-slate-100" />
+                  
+                  <OrderItemsCard
+                    title="菜品明细"
+                    titleAsHeading={false}
+                    items={orderItems}
+                    showRemark
+                    usedCoupons={usedCoupons}
+                    couponDiscountAmount={Number(order.coupon_discount_amount)}
+                    totalAmount={Number(order.total_amount)}
+                    createdAt={order.created_at}
+                    penaltyRate={order.penalty_rate}
+                    penaltyAmount={order.penalty_amount}
+                    totalColor="text-orange-600"
+                  />
+                </CardContent>
+              </Card>
 
-            {(order.coupon_ids?.length ?? 0) > 0 && (
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ fontSize: '13px', color: '#666', marginBottom: '8px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  客户本单所用的优惠券
-                  <span style={{ fontSize: '12px', color: '#ef4444' }}>(勾选退回给客户)</span>
+              {/* --- 沟通记录区 --- */}
+              <Card className="border-none shadow-sm overflow-hidden bg-white ring-1 ring-black/5 py-0">
+                <div className="px-5 py-3 border-b bg-slate-50/80 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                    <MessageSquare size={14} className="text-orange-500" /> 沟通与协商记录
+                  </div>
                 </div>
-                <div style={{ background: someCouponsSelected || allCouponsSelected ? '#eff6ff' : '#f9fafb', borderRadius: '8px', border: `1px solid ${allCouponsSelected ? '#bfdbfe' : someCouponsSelected ? '#93c5fd' : '#e5e7eb'}`, overflow: 'hidden', transition: 'all 0.2s' }}>
-                  {/* 每张券独立一行 + 自己的 checkbox */}
-                  {usedCoupons.map((coupon, idx) => {
-                    const isChecked = selectedCouponRefundIds.has(coupon.id)
-                    return (
-                      <label key={coupon.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', cursor: 'pointer', borderBottom: idx < usedCoupons.length - 1 ? '1px dashed #e5e7eb' : 'none' }}>
-                        <input
-                          type="checkbox"
-                          style={{ transform: 'scale(1.2)', marginLeft: '4px', flexShrink: 0 }}
-                          checked={isChecked}
-                          onChange={e => {
-                            const next = new Set(selectedCouponRefundIds)
-                            if (e.target.checked) next.add(coupon.id)
-                            else next.delete(coupon.id)
-                            setSelectedCouponRefundIds(next)
-                          }}
-                        />
-                        <div style={{ width: '32px', height: '32px', background: isChecked ? '#3b82f6' : '#9ca3af', color: '#fff', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '12px', fontWeight: 'bold' }}>
-                          券
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: isChecked ? '#1e3a8a' : '#374151' }}>
-                            🏷️ {coupon.title}
+                <CardContent className="p-0">
+                  <ScrollArea className="h-[240px] px-4 py-2" ref={msgBoxRef}>
+                    <div className="space-y-3 py-2">
+                      {messages.length === 0 ? (
+                        <div className="text-center text-slate-400 text-xs py-12 italic font-medium">暂无沟通记录</div>
+                      ) : messages.map(msg => {
+                        const isMerc = msg.sender === 'merchant'
+                        const isAfterSales = msg.msg_type === 'after_sales'
+                        return (
+                          <div key={msg.id} className={cn("flex", isMerc ? "justify-end" : "justify-start")}>
+                            <div className="max-w-[85%] space-y-0.5">
+                              {msg.sender === 'customer' && msg.rating && (
+                                <p className="text-[10px] text-amber-500 font-black ml-1">客户评价 {msg.rating} 星 ⭐</p>
+                              )}
+                              <div className={cn(
+                                "px-3 py-1.5 rounded-2xl text-[13px] leading-relaxed font-medium transition-all shadow-sm ring-1",
+                                isMerc 
+                                  ? "bg-orange-500 text-white rounded-tr-none ring-orange-500 ml-auto" 
+                                  : "bg-slate-100 text-slate-800 rounded-tl-none ring-slate-200",
+                                isAfterSales && !isMerc && "bg-red-50 text-red-900 ring-red-100"
+                              )}>
+                                {isAfterSales && !isMerc && <div className="text-[10px] font-black mb-0.5 opacity-80 uppercase flex items-center gap-1"><AlertTriangle size={10} /> 售后争议</div>}
+                                {isAfterSales && isMerc && <div className="text-[10px] font-black mb-0.5 opacity-80 uppercase flex items-center gap-1"><MessageSquare size={10} /> 售后处理</div>}
+                                {msg.content}
+                              </div>
+                              <p className={cn("text-[9px] text-slate-400 font-bold px-1.5 mt-0.5", isMerc ? "text-right" : "text-left")}>
+                                {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
                           </div>
-                          <div style={{ fontSize: '12px', color: isChecked ? '#3b82f6' : '#9ca3af', marginTop: '2px' }}>
-                            抵扣 {formatPrice(coupon.amount)}{isChecked ? ' · 将退回客户' : ''}
-                          </div>
-                        </div>
-                      </label>
-                    )
-                  })}
-                  {/* 全选/取消全选 master 行 */}
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', cursor: 'pointer', background: allCouponsSelected ? '#dbeafe' : someCouponsSelected ? '#f0f7ff' : '#f3f4f6', borderTop: '1px solid #e5e7eb' }}>
-                    <input
-                      ref={masterCouponCheckboxRef}
-                      type="checkbox"
-                      style={{ transform: 'scale(1.2)', marginLeft: '4px' }}
-                      onChange={e => {
-                        if (e.target.checked) setSelectedCouponRefundIds(new Set(usedCoupons.map(c => c.id)))
-                        else setSelectedCouponRefundIds(new Set())
-                      }}
-                    />
-                    <div style={{ flex: 1, fontSize: '13px', color: allCouponsSelected ? '#1e3a8a' : '#374151', fontWeight: '600' }}>
-                      共 {usedCoupons.length} 张券 · 合计抵扣 {formatPrice(Number(order.coupon_discount_amount || 0))}
-                      {selectedCouponRefundIds.size > 0 && (
-                        <span style={{ color: '#3b82f6', marginLeft: '8px' }}>· 已选 {selectedCouponRefundIds.size} 张将退回</span>
-                      )}
+                        )
+                      })}
+                      <div ref={endOfMessagesRef} />
                     </div>
-                  </label>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '20px', marginBottom: '16px', background: '#fff7ed', padding: '12px', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '14px', fontWeight: '700', color: '#9a3412' }}>拟退款金额合计</span>
-                {currentRefundTotal() >= Number(order.total_amount) && (
-                  <span style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>不可大于实付 {formatPrice(Number(order.total_amount))}</span>
-                )}
-              </div>
-              <span style={{ fontSize: '24px', fontWeight: '800', color: '#ea580c' }}>{formatPrice(currentRefundTotal())}</span>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button className="btn btn-outline" style={{ flex: 1, color: '#ef4444', borderColor: '#fca5a5' }} onClick={handleRejectRefund}>驳回售后</button>
-              <button className="btn btn-primary" style={{ flex: 2, background: '#ea580c' }} onClick={handleConfirmRefund}>同意入账并完结</button>
+                  </ScrollArea>
+                  <div className="p-3 bg-slate-50 border-t flex gap-2">
+                    <Input 
+                      value={asMsgText} 
+                      onChange={e => setAsMsgText(e.target.value)}
+                      placeholder="发送消息..."
+                      className="h-10 rounded-full bg-white border-slate-200 focus-visible:ring-orange-500 transition-all font-medium"
+                      onKeyDown={e => e.key === 'Enter' && sendAfterSalesMessage()}
+                    />
+                    <Button 
+                      onClick={() => sendAfterSalesMessage()}
+                      disabled={sendingAsMsg || !asMsgText.trim()}
+                      className="rounded-full size-10 p-0 flex-shrink-0 bg-orange-500 hover:bg-orange-600 shadow-md shadow-orange-200"
+                    >
+                      <Send size={16} />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </div>
-        </>
-      )}
 
-      {/* 推进状态二次确认弹窗 */}
-      {isConfirmingStatus && (() => {
-        const idx = STATUS_FLOW.indexOf(order.status)
-        const nextStatus = STATUS_FLOW[idx + 1]
-        return (
-          <>
-            <div className="overlay" style={{ zIndex: 110 }} onClick={() => setIsConfirmingStatus(false)} />
-            <div className="dialog" style={{ zIndex: 120 }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{
-                  width: '56px', height: '56px', borderRadius: '50%',
-                  background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  margin: '0 auto 14px'
-                }}>
-                  <AlertTriangle size={28} color="#ef4444" />
+          {/* Footer Footer */}
+          {!['completed', 'cancelled'].includes(order.status) && (
+            <div className="px-6 py-4 border-t bg-white flex gap-3 flex-shrink-0 pb-safe shadow-[0_-4px_12px_rgba(0,0,0,0.02)]">
+              <Button variant="outline" className="flex-1 text-red-500 hover:bg-red-50 border-slate-200 font-bold h-11" onClick={() => setShowCancel(true)}>
+                取消订单
+              </Button>
+              <Button 
+                className="flex-[2] h-11 bg-orange-500 hover:bg-orange-600 shadow-orange-200 shadow-lg font-black text-base"
+                disabled={order.after_sales_status === 'pending'}
+                onClick={requestStatusUpdate}
+              >
+                {order.after_sales_status === 'pending' ? '请先处理售后' : (STATUS_LABELS[nextStatus] || '完成订单')}
+                {order.after_sales_status !== 'pending' && <ChevronRight size={18} className="ml-1" />}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* --- 取消确认 (AlertDialog) --- */}
+      <AlertDialog open={showCancel} onOpenChange={setShowCancel}>
+        <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600 text-xl font-black">
+              <AlertTriangle className="size-6" /> 确认取消订单？
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600 font-medium leading-relaxed">
+              商家取消订单将触发 <span className="text-red-600 font-bold italic">全额退款</span>。系统将自动回退客户已使用的积分和优惠券。此操作为高危行为，不可逆转，请慎重考虑。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-3 sm:gap-0 font-bold">
+            <AlertDialogCancel className="rounded-xl h-11 border-slate-200">再想想</AlertDialogCancel>
+            <AlertDialogAction onClick={cancelOrder} className="rounded-xl h-11 bg-red-600 hover:bg-red-700 shadow-lg shadow-red-100">确认极速取消</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* --- 状态推进确认 (AlertDialog) --- */}
+      <AlertDialog open={isConfirmingStatus} onOpenChange={setIsConfirmingStatus}>
+        <AlertDialogContent className="sm:max-w-md rounded-3xl border-none shadow-2xl overflow-hidden p-0">
+          <div className="bg-slate-50 p-8 flex flex-col items-center gap-6">
+            <div className="size-16 rounded-full bg-white shadow-sm flex items-center justify-center ring-8 ring-orange-50/50 scale-110">
+               <AlertTriangle className="text-orange-500 scale-125" />
+            </div>
+            
+            <div className="space-y-2 text-center">
+              <AlertDialogTitle className="text-2xl font-black tracking-tighter">确认变更订单状态？</AlertDialogTitle>
+              <AlertDialogDescription className="text-slate-500 font-medium">变更后将无法回退到上一个状态</AlertDialogDescription>
+            </div>
+            
+            <div className="flex items-center gap-4 py-3 px-8 bg-white rounded-3xl shadow-sm ring-1 ring-slate-100">
+               <Badge variant="secondary" className="px-4 py-1 text-sm bg-slate-100 text-slate-500 border-none font-bold italic">{STATUS_LABELS[order.status]}</Badge>
+               <ChevronRight className="text-orange-400 size-5 animate-pulse" />
+               <Badge className="px-4 py-1 text-sm bg-orange-500 text-white border-none font-black italic shadow-md shadow-orange-100">{STATUS_LABELS[nextStatus]}</Badge>
+            </div>
+            
+            <p className="text-sm font-black text-slate-400 bg-slate-100/80 px-4 py-1.5 rounded-full uppercase tracking-widest leading-none">
+              客户: {order.customer_name} · 合计: {formatPrice(Number(order.total_amount))}
+            </p>
+          </div>
+          
+          <div className="p-6 bg-white grid grid-cols-2 gap-4">
+            <AlertDialogCancel className="rounded-2xl h-12 border-slate-100 font-bold hover:bg-slate-50 transition-all">取消</AlertDialogCancel>
+            <AlertDialogAction onClick={updateStatus} className="rounded-2xl h-12 bg-orange-500 hover:bg-orange-600 font-black shadow-lg shadow-orange-100 text-base transition-all">确认更新</AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* --- 退款协商控制台 (Dialog) --- */}
+      <Dialog open={showRefundPanel} onOpenChange={setShowRefundPanel}>
+        <DialogContent className="sm:max-w-[500px] border-none shadow-2xl p-0 overflow-hidden bg-slate-50 rounded-3xl">
+          <DialogHeader className="p-6 bg-white border-b flex-shrink-0">
+            <DialogTitle className="text-2xl font-black tracking-tight">退款协商控制台</DialogTitle>
+          </DialogHeader>
+          
+          <ScrollArea className="max-h-[60vh]">
+            <div className="p-6 space-y-6">
+              {/* 总额与建议卡片 */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-100 space-y-4">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="font-bold text-slate-400 uppercase tracking-widest">订单实付总额</span>
+                  <span className="font-black text-slate-800 text-base tracking-tight font-mono">{formatPrice(Number(order.total_amount))}</span>
                 </div>
-                <h3 style={{ fontWeight: '800', marginBottom: '10px' }}>确认更新状态？</h3>
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  gap: '10px', margin: '14px 0', fontSize: '15px'
-                }}>
-                  <span style={{
-                    padding: '4px 12px', borderRadius: '20px',
-                    background: '#f5f5f4', fontWeight: '600', color: '#78716c'
-                  }}>{STATUS_LABELS[order.status]}</span>
-                  <ChevronRight size={18} color="#f59e0b" />
-                  <span style={{
-                    padding: '4px 12px', borderRadius: '20px',
-                    background: '#fff7ed', fontWeight: '700', color: '#ea580c',
-                    border: '1px solid #fed7aa'
-                  }}>{STATUS_LABELS[nextStatus]}</span>
+                {suggestedRefund && suggestedRefund.rate > 0 && (
+                  <div className="p-4 bg-orange-50 rounded-2xl border border-orange-100 space-y-3 shadow-[inner_0_2px_4px_rgba(0,0,0,0.01)]">
+                    <div className="flex justify-between text-xs font-black text-orange-700">
+                      <span className="flex items-center gap-1.5"><AlertTriangle size={12} /> 智算中心建议扣除损耗 ({(suggestedRefund.rate * 100).toFixed(0)}%)</span>
+                      <span className="font-mono text-sm">-{formatPrice(suggestedRefund.amount)}</span>
+                    </div>
+                    <p className="text-[10px] text-orange-600/80 leading-relaxed font-bold italic border-l-2 border-orange-200 pl-2">原因：{suggestedRefund.reason}</p>
+                    <Separator className="bg-orange-200/40" />
+                    <div className="flex justify-between items-center pt-1">
+                      <span className="text-xs font-black text-orange-800 uppercase tracking-tight">建议最优退款值</span>
+                      <span className="text-2xl font-black text-orange-600 font-mono tracking-tighter leading-none">{formatPrice(suggestedRefund.final)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 模式选择 */}
+              <div className="flex p-1.5 bg-slate-200/60 rounded-2xl ring-1 ring-black/5">
+                 <Button 
+                   variant={refundMode === 'fixed' ? 'secondary' : 'ghost'} 
+                   className={cn("flex-1 h-9 text-xs font-black rounded-xl transition-all", refundMode === 'fixed' ? "bg-white shadow-md text-orange-600" : "text-slate-500 hover:bg-white/20")}
+                   onClick={() => setRefundMode('fixed')}
+                 >按金额</Button>
+                 <Button 
+                   variant={refundMode === 'ratio' ? 'secondary' : 'ghost'} 
+                   className={cn("flex-1 h-9 text-xs font-black rounded-xl transition-all", refundMode === 'ratio' ? "bg-white shadow-md text-orange-600" : "text-slate-500 hover:bg-white/20")}
+                   onClick={() => setRefundMode('ratio')}
+                 >按比例</Button>
+                 <Button 
+                   variant={refundMode === 'items' ? 'secondary' : 'ghost'} 
+                   className={cn("flex-1 h-9 text-xs font-black rounded-xl transition-all", refundMode === 'items' ? "bg-white shadow-md text-orange-600" : "text-slate-500 hover:bg-white/20")}
+                   onClick={() => setRefundMode('items')}
+                 >按菜品</Button>
+              </div>
+
+              {/* 输入区 */}
+              <div className="space-y-4">
+                {refundMode === 'fixed' && (
+                  <div className="space-y-2.5">
+                    <Label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">拟定退款绝对值 (固定金额)</Label>
+                    <div className="relative">
+                       <Input type="number" value={refundInput} onChange={e => setRefundInput(e.target.value)} className="font-mono text-2xl font-black h-16 bg-white rounded-2xl shadow-sm border-slate-100 focus-visible:ring-orange-500 transition-all font-bold" />
+                    </div>
+                  </div>
+                )}
+                {refundMode === 'ratio' && (
+                  <div className="space-y-2.5">
+                    <Label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">按订单实付比例结算 (%)</Label>
+                    <div className="relative">
+                      <Input type="number" value={refundInput} onChange={e => setRefundInput(e.target.value)} className="font-mono text-2xl font-black h-16 bg-white rounded-2xl shadow-sm border-slate-100 focus-visible:ring-orange-500 px-6 transition-all font-bold" placeholder="0-100" />
+                      <span className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-300 font-black">%</span>
+                    </div>
+                  </div>
+                )}
+                {refundMode === 'items' && (
+                  <div className="space-y-3">
+                    <Label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">智能勾选退款明细</Label>
+                    <Card className="border-none shadow-sm rounded-2xl overflow-hidden bg-white ring-1 ring-slate-100">
+                      <div className="divide-y divide-slate-50">
+                        {orderItems.map(item => {
+                          const currentQty = selectedRefundItems[item.id] || 0
+                          return (
+                            <div key={item.id} className="flex items-center justify-between py-3.5 px-4 hover:bg-slate-50/50 transition-colors">
+                              <div className="flex items-center gap-3.5">
+                                <Checkbox 
+                                  className="rounded data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500"
+                                  checked={currentQty > 0} 
+                                  onCheckedChange={(checked) => setSelectedRefundItems(prev => ({ ...prev, [item.id]: checked ? item.quantity : 0 }))} 
+                                />
+                                <div className="space-y-1">
+                                  <p className="text-sm font-black text-slate-700 leading-none">{item.item_name}</p>
+                                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">原购数量: {item.quantity} · 单价: {formatPrice(item.item_price)}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-5">
+                                <div className="flex items-center ring-1 ring-slate-200 rounded-lg overflow-hidden h-8 bg-slate-50/50">
+                                  <Button variant="ghost" className="size-8 p-0 rounded-none text-slate-400 hover:text-slate-600" disabled={currentQty <= 1} onClick={() => setSelectedRefundItems(p => ({ ...p, [item.id]: p[item.id] - 1 }))}>-</Button>
+                                  <span className="text-xs font-black w-7 text-center">{currentQty}</span>
+                                  <Button variant="ghost" className="size-8 p-0 rounded-none text-slate-400 hover:text-slate-600" disabled={currentQty >= item.quantity} onClick={() => setSelectedRefundItems(p => ({ ...p, [item.id]: (p[item.id] || 0) + 1 }))}>+</Button>
+                                </div>
+                                <span className="text-xs font-black text-slate-600 w-16 text-right font-mono tracking-tighter">{formatPrice(item.item_price * currentQty)}</span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </Card>
+                  </div>
+                )}
+              </div>
+
+              {/* 优惠券退还 */}
+              {usedCoupons.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center px-1">
+                    <Label className="text-xs font-black text-slate-400 uppercase tracking-widest">退还订单关联优惠券</Label>
+                    <span className="text-[10px] font-black text-red-500 bg-red-50 px-2 py-0.5 rounded-full ring-1 ring-red-100/50">已勾选退回给客</span>
+                  </div>
+                  <Card className="border-none shadow-sm rounded-2xl overflow-hidden bg-white divide-y divide-slate-50 ring-1 ring-slate-100">
+                    {usedCoupons.map((coupon) => {
+                      const isChecked = selectedCouponRefundIds.has(coupon.id)
+                      return (
+                        <label key={coupon.id} className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-slate-50 transition-colors">
+                          <Checkbox 
+                            className="data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 rounded"
+                            checked={isChecked}
+                            onCheckedChange={(checked) => {
+                              const next = new Set(selectedCouponRefundIds)
+                              if (checked) next.add(coupon.id); else next.delete(coupon.id);
+                              setSelectedCouponRefundIds(next)
+                            }}
+                          />
+                          <div className="flex-1 space-y-1">
+                            <p className={cn("text-sm font-black tracking-tight", isChecked ? "text-blue-600" : "text-slate-700")}>🏷️ {coupon.title}</p>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter opacity-80">抵扣面额: {formatPrice(coupon.amount)}{isChecked ? ' · 将退回至客户账户' : ''}</p>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </Card>
                 </div>
-                <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginBottom: '20px' }}>
-                  {order.customer_name} · {formatPrice(Number(order.total_amount))}
-                </p>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button onClick={() => setIsConfirmingStatus(false)} className="btn btn-outline" style={{ flex: 1 }}>再想想</button>
-                  <button onClick={updateStatus} className="btn btn-primary" style={{ flex: 1 }}>确认</button>
-                </div>
+              )}
+
+              {/* 汇总与操作 */}
+              <div className="bg-orange-500 rounded-[2.5rem] p-8 shadow-2xl shadow-orange-200 ring-4 ring-orange-500/10 space-y-1 transform scale-100 hover:scale-[1.01] transition-all">
+                <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] text-center mb-1">拟同意退款合计总额</p>
+                <p className="text-4xl font-black text-white text-center font-mono tracking-tighter drop-shadow-sm">{formatPrice(currentRefundTotal())}</p>
+                {currentRefundTotal() >= Number(order.total_amount) && (
+                  <div className="flex justify-center mt-3">
+                    <span className="text-[10px] font-black text-white bg-red-600/30 px-3 py-1 rounded-full ring-1 ring-white/20 animate-pulse">⚠️ 已达最大退款额度限制</span>
+                  </div>
+                )}
               </div>
             </div>
-          </>
-        )
-      })()}
+          </ScrollArea>
+
+          <DialogFooter className="p-6 bg-white border-t sm:justify-start gap-4 flex-shrink-0">
+            <Button variant="outline" className="flex-1 border-red-100 text-red-600 hover:bg-red-50 rounded-2xl h-12 font-bold transition-all" onClick={handleRejectRefund}>驳回售后</Button>
+            <Button className="flex-[2] bg-orange-500 hover:bg-orange-600 font-black shadow-xl shadow-orange-100 rounded-2xl h-12 text-base tracking-tight" onClick={handleConfirmRefund}>同意入账并完结</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- 取消确认 (AlertDialog) --- */}
+      <AlertDialog open={showCancel} onOpenChange={setShowCancel}>
+        <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600 text-xl font-black">
+              <AlertTriangle className="size-6" /> 确认取消订单？
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600 font-medium leading-relaxed">
+              商家取消订单将触发 <span className="text-red-600 font-bold italic">全额退款</span>。系统将自动回退客户已使用的积分和优惠券。此操作为高危行为，不可逆转，请慎重考虑。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-3 sm:gap-0 font-bold">
+            <AlertDialogCancel className="rounded-xl h-11 border-slate-200">再想想</AlertDialogCancel>
+            <AlertDialogAction onClick={cancelOrder} className="rounded-xl h-11 bg-red-600 hover:bg-red-700 shadow-lg shadow-red-100">确认极速取消</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* --- 状态推进确认 (AlertDialog) --- */}
+      <AlertDialog open={isConfirmingStatus} onOpenChange={setIsConfirmingStatus}>
+        <AlertDialogContent className="sm:max-w-md rounded-3xl border-none shadow-2xl overflow-hidden p-0">
+          <div className="bg-slate-50 p-8 flex flex-col items-center gap-6">
+            <div className="size-16 rounded-full bg-white shadow-sm flex items-center justify-center ring-8 ring-orange-50/50 scale-110">
+               <AlertTriangle className="text-orange-500 scale-125" />
+            </div>
+            
+            <div className="space-y-2 text-center">
+              <AlertDialogTitle className="text-2xl font-black tracking-tighter">确认变更订单状态？</AlertDialogTitle>
+              <AlertDialogDescription className="text-slate-500 font-medium">变更后将无法回退到上一个状态</AlertDialogDescription>
+            </div>
+            
+            <div className="flex items-center gap-4 py-3 px-8 bg-white rounded-3xl shadow-sm ring-1 ring-slate-100">
+               <Badge variant="secondary" className="px-4 py-1 text-sm bg-slate-100 text-slate-500 border-none font-bold italic">{STATUS_LABELS[order.status]}</Badge>
+               <ChevronRight className="text-orange-400 size-5 animate-pulse" />
+               <Badge className="px-4 py-1 text-sm bg-orange-500 text-white border-none font-black italic shadow-md shadow-orange-100">{STATUS_LABELS[nextStatus]}</Badge>
+            </div>
+            
+            <p className="text-sm font-black text-slate-400 bg-slate-100/80 px-4 py-1.5 rounded-full uppercase tracking-widest leading-none">
+              客户: {order.customer_name} · 合计: {formatPrice(Number(order.total_amount))}
+            </p>
+          </div>
+          
+          <div className="p-6 bg-white grid grid-cols-2 gap-4">
+            <AlertDialogCancel className="rounded-2xl h-12 border-slate-100 font-bold hover:bg-slate-50 transition-all">取消</AlertDialogCancel>
+            <AlertDialogAction onClick={updateStatus} className="rounded-2xl h-12 bg-orange-500 hover:bg-orange-600 font-black shadow-lg shadow-orange-100 text-base transition-all">确认更新</AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
