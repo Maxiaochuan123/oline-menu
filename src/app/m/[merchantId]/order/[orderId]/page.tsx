@@ -11,6 +11,7 @@ import {
   ArrowLeft, RefreshCw, QrCode
 } from 'lucide-react'
 import Link from 'next/link'
+import Image from 'next/image'
 import React from 'react'
 import OrderItemsCard from '@/components/OrderItemsCard'
 import type { UsedCoupon } from '@/components/OrderItemsCard'
@@ -228,8 +229,6 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
   async function handleNegotiateRefund() {
     if (!order) return
     setSendingMsg(true)
-    const content = "【协商退单】客户由于配送中等原因申请取消订单，请及时处理"
-    
     // 同步更新订单状态，使商家端弹出“去处理”面板
     const { error: orderError } = await supabase.from('orders').update({
       after_sales_status: 'pending',
@@ -242,15 +241,34 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
       console.error('Update order after_sales_status error:', orderError)
     }
 
+    // 自动模拟两笔消息对话 (仪式感 & 谈判保护 优化)
+    const penaltyRes = calculateCancellationPenalty(order)
+    const penaltyBrief = penaltyRes.rate > 0 
+      ? `按规则此时退单需承担 ${(penaltyRes.rate * 100).toFixed(0)}% (${formatPrice(Number(order.total_amount) * penaltyRes.rate)}) 的损耗补偿。`
+      : '目前由于时间尚早，暂无需承担违约金。'
+
+    // 1. 客户发出协商请求
     await supabase.from('messages').insert({
       order_id: orderId,
       merchant_id: merchantId,
       sender: 'customer',
-      content,
+      content: "【协商退单请求】我想取消订单，希望能与您协商处理方式。",
       msg_type: 'after_sales',
       is_read_by_merchant: false,
       is_read_by_customer: true,
     })
+
+    // 2. 商家自动应答 (增加规则提示)
+    await supabase.from('messages').insert({
+      order_id: orderId,
+      merchant_id: merchantId,
+      sender: 'merchant',
+      content: `收到您的退单申请。${penaltyBrief}不过您也可以在此说明具体原因或预期的退款金额，我会尽快与您沟通处理。`,
+      msg_type: 'after_sales',
+      is_read_by_merchant: true,
+      is_read_by_customer: false,
+    })
+
     setSendingMsg(false)
     loadData() // 刷新订单状态
     loadMessages()
@@ -293,15 +311,26 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
       return
     }
 
-    // 退还本单使用的所有优惠券
+    // 退还本单使用的所有优惠券并回滚积分
     const couponIds: string[] = order.coupon_ids ?? []
-    if (couponIds.length > 0 && order.customer_id) {
-      await supabase
-        .from('user_coupons')
-        .update({ status: 'unused', used_at: null })
-        .eq('customer_id', order.customer_id)
-        .in('coupon_id', couponIds)
-        .eq('status', 'used')
+    if (order.customer_id) {
+      if (couponIds.length > 0) {
+        await supabase
+          .from('user_coupons')
+          .update({ status: 'unused', used_at: null })
+          .eq('customer_id', order.customer_id)
+          .in('coupon_id', couponIds)
+          .eq('status', 'used')
+      }
+      
+      // 回退积分（按订单实付金额 1:1 回退）
+      const { data: cust } = await supabase.from('customers').select('points').eq('id', order.customer_id).single()
+      if (cust) {
+        const pointsToRollback = Math.floor(Number(order.total_amount))
+        await supabase.from('customers')
+          .update({ points: Math.max(0, (cust.points ?? 0) - pointsToRollback) })
+          .eq('id', order.customer_id)
+      }
     }
 
     setShowCancelConfirm(false)
@@ -360,12 +389,14 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
     if (error) {
       alert('发起售后失败: ' + error.message)
     } else {
-      // 自动发送第一条售后沟通消息
-      let firstMsgContent = `【发起售后】原因：${finalReason}`
+      // 自动发送第一条售后沟通消息 (仪式感 优化)
+      let firstMsgContent = `【售后维权申请】原因：${finalReason}`
       if (afterSalesReason === '菜品不合适' && afterSalesItems.length > 0) {
         const itemNames = items.filter(i => afterSalesItems.includes(i.id)).map(i => i.item_name).join('、')
         firstMsgContent += `\n涉及菜品：${itemNames}`
       }
+      
+      // 1. 客户发出申请
       await supabase.from('messages').insert({
         order_id: order.id,
         merchant_id: merchantId,
@@ -374,6 +405,22 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
         msg_type: 'after_sales',
         is_read_by_merchant: false,
         is_read_by_customer: true,
+      })
+
+      // 2. 商家自动应答 (增加规则提示)
+      const penaltyRes = calculateCancellationPenalty(order)
+      const penaltyNotice = penaltyRes.rate > 0 
+        ? `（注：按规则当前申请需补偿约 ${formatPrice(Number(order.total_amount) * penaltyRes.rate)} 的食材损耗）`
+        : ''
+
+      await supabase.from('messages').insert({
+        order_id: order.id,
+        merchant_id: merchantId,
+        sender: 'merchant',
+        content: `收到您的售后申请，我会尽快核实处理。${penaltyNotice}如有更详细的照片或说明，您可以继续在此留言告知我。`,
+        msg_type: 'after_sales',
+        is_read_by_merchant: true,
+        is_read_by_customer: false,
       })
 
       setShowAfterSales(false)
@@ -392,7 +439,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
       const compressedFile = await new Promise<File>((resolve) => {
         const reader = new FileReader()
         reader.onload = (event) => {
-          const img = new Image()
+          const img = new window.Image()
           img.onload = () => {
             const canvas = document.createElement('canvas')
             let { width, height } = img
@@ -500,6 +547,20 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
             ))}
           </div>
           
+          {order.status === 'pending' && (
+            <div style={{
+              padding: '16px', background: '#fffef0', border: '1px dashed #fcd34d',
+              borderRadius: '12px', marginBottom: '20px', textAlign: 'center',
+              animation: 'fadeIn 0.5s ease'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '4px' }}>
+                <span className="dot-pulse" style={{ width: '8px', height: '8px', background: '#f59e0b', borderRadius: '50%' }} />
+                <span style={{ fontSize: '15px', fontWeight: '800', color: '#b45309' }}>商家正快马加鞭赶来审单...</span>
+              </div>
+              <p style={{ fontSize: '12px', color: '#d97706', opacity: 0.8 }}>请保持此页面开启，及时查看接单反馈</p>
+            </div>
+          )}
+
           {order.status !== 'cancelled' && order.status !== 'completed' && (
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px' }}>
               <span style={{ fontSize: '14px', color: '#f59e0b', fontWeight: '700', padding: '6px 12px', background: '#fef3c7', borderRadius: '20px' }}>
@@ -535,7 +596,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
               style={{ color: '#ef4444' }}
               onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}
             >
-              退单
+              申请退单
             </button>
           )}
 
@@ -546,14 +607,14 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
                 style={{ flex: 1, color: '#ef4444', borderColor: '#fca5a5' }}
                 onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}
               >
-                强制退单
+                申请退单
               </button>
               <button 
                 className="btn btn-outline"
                 style={{ flex: 1, color: '#f59e0b', borderColor: '#fcd34d' }}
                 onClick={handleNegotiateRefund}
               >
-                与商家协商退单
+                与商家协商
               </button>
             </div>
           )}
@@ -733,19 +794,25 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
             <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
               {(merchant?.payment_qr_urls?.wechat) && (
                 <div style={{ textAlign: 'center' }}>
-                  <img src={merchant.payment_qr_urls.wechat} alt="微信收款码" style={{ width: '160px', height: '160px', objectFit: 'contain', borderRadius: '12px', border: '2px solid #bbf7d0' }} />
+                  <div style={{ position: 'relative', width: '160px', height: '160px', borderRadius: '12px', border: '2px solid #bbf7d0', overflow: 'hidden' }}>
+                    <Image src={merchant.payment_qr_urls.wechat} alt="微信收款码" fill unoptimized style={{ objectFit: 'contain' }} />
+                  </div>
                   <div style={{ fontSize: '13px', color: '#15803d', fontWeight: '700', marginTop: '6px' }}>🟢 微信支付</div>
                 </div>
               )}
               {(merchant?.payment_qr_urls?.alipay) && (
                 <div style={{ textAlign: 'center' }}>
-                  <img src={merchant.payment_qr_urls.alipay} alt="支付宝收款码" style={{ width: '160px', height: '160px', objectFit: 'contain', borderRadius: '12px', border: '2px solid #bfdbfe' }} />
+                  <div style={{ position: 'relative', width: '160px', height: '160px', borderRadius: '12px', border: '2px solid #bfdbfe', overflow: 'hidden' }}>
+                    <Image src={merchant.payment_qr_urls.alipay} alt="支付宝收款码" fill unoptimized style={{ objectFit: 'contain' }} />
+                  </div>
                   <div style={{ fontSize: '13px', color: '#1d4ed8', fontWeight: '700', marginTop: '6px' }}>🔵 支付宝</div>
                 </div>
               )}
               {/* 匹配老字段，如果新字段都没有 */}
               {!merchant?.payment_qr_urls?.wechat && !merchant?.payment_qr_urls?.alipay && merchant?.payment_qr_url && (
-                <img src={merchant.payment_qr_url} alt="收款码" style={{ width: '200px', height: '200px', objectFit: 'contain', borderRadius: '12px', border: '1px solid #eee' }} />
+                <div style={{ position: 'relative', width: '200px', height: '200px', borderRadius: '12px', border: '1px solid #eee', overflow: 'hidden' }}>
+                  <Image src={merchant.payment_qr_url} alt="收款码" fill unoptimized style={{ objectFit: 'contain' }} />
+                </div>
               )}
             </div>
             <div style={{ marginTop: '16px', padding: '12px', background: '#f0fdf4', borderRadius: '8px', color: '#15803d', fontSize: '13px' }}>
@@ -818,8 +885,8 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
                 <p style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>请上传相关照片凭证（可选）：</p>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                   {afterSalesImages.map((file, idx) => (
-                    <div key={idx} style={{ position: 'relative', width: '60px', height: '60px' }}>
-                      <img src={URL.createObjectURL(file)} alt="凭证" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
+                    <div key={idx} style={{ position: 'relative', width: '48px', height: '48px', borderRadius: '4px', overflow: 'hidden' }}>
+                      <Image src={URL.createObjectURL(file)} alt="凭证" fill unoptimized style={{ objectFit: 'cover' }} />
                       <button 
                         onClick={() => setAfterSalesImages(afterSalesImages.filter((_, i) => i !== idx))}
                         style={{ position: 'absolute', top: -6, right: -6, background: '#ef4444', color: 'white', borderRadius: '50%', border: 'none', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
@@ -986,18 +1053,41 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
                       background: isAfterSales ? (isCust ? '#ef4444' : '#fee2e2') : (isCust ? 'var(--color-primary)' : 'white'),
                       color: isAfterSales ? (isCust ? 'white' : '#991b1b') : (isCust ? 'white' : '#1c1917'),
                       boxShadow: isCust ? 'none' : '0 2px 8px rgba(0,0,0,0.04)',
-                      border: isCust ? 'none' : '1px solid #f0f0f0',
-                      fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap'
+                      border: isCust ? 'none' : isAfterSales ? '1px solid #fca5a5' : '1px solid #f0f0f0',
+                      fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap',
+                      position: 'relative',
+                      overflow: 'hidden'
                     }}>
                       {/* 如果是系统特殊事件消息添加打眼标识 */}
                       {isAfterSales && isCust && <div style={{ fontSize: '12px', fontWeight: '800', marginBottom: '4px', opacity: 0.9 }}>🚨 发起售后争议</div>}
+                      {isAfterSales && !isCust && (
+                        <div style={{ 
+                          fontSize: '11px', fontWeight: '800', marginBottom: '6px', 
+                          color: '#dc2626', display: 'flex', alignItems: 'center', gap: '4px',
+                          background: 'rgba(220, 38, 38, 0.1)', padding: '4px 8px', borderRadius: '4px',
+                          marginLeft: '-4px', marginRight: '-4px'
+                        }}>
+                          <AlertCircle size={14} /> 商家协商确认
+                        </div>
+                      )}
                       {isClosed && <div style={{ fontSize: '12px', fontWeight: '800', marginBottom: '4px', color: '#10b981' }}>✅ 纠纷已完结</div>}
-                      {msg.content}
+                      
+                      {/* 消息内容渲染，对包含金额的文本加粗 */}
+                      {msg.content.includes('退款') || msg.content.includes('金额') ? (
+                        <div style={{ fontWeight: !isCust && isAfterSales ? '600' : '400' }}>
+                          {msg.content}
+                        </div>
+                      ) : msg.content}
+
+                      {/* 商家协商卡片装饰线 */}
+                      {!isCust && isAfterSales && (
+                        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '4px', background: '#dc2626' }} />
+                      )}
                     </div>
                     
                     <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px', textAlign: isCust ? 'right' : 'left' }}>
                       {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                      {!isCust && <span style={{ marginLeft: '4px', color: '#10b981', fontWeight: '600' }}>商家</span>}
+                      {!isCust && <span style={{ marginLeft: '4px', color: isAfterSales ? '#dc2626' : '#10b981', fontWeight: '600' }}>商家{isAfterSales ? '处理中' : ''}</span>}
                     </div>
                   </div>
                 </div>

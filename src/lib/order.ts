@@ -26,8 +26,12 @@ export function calculateCancellationPenalty(order: Order): { rate: number; reas
     const confirmedTime = new Date(order.confirmed_at)
     const diffMinutes = (now.getTime() - confirmedTime.getTime()) / (1000 * 60)
 
+    if (diffMinutes < 3) {
+      return { rate: 0, reason: '商家已接单，3分钟内可极速免费取消', canCancel: true }
+    }
+
     if (diffMinutes < 20) {
-      return { rate: 0.05, reason: '已超过免费取消时段 (接单不满20分钟)，需承担 5% 食材损耗费', canCancel: true }
+      return { rate: 0.05, reason: '已超过 3 分钟极速取消时段 (接单不满20分钟)，需承担 5% 食材损耗费', canCancel: true }
     }
 
     // 超过 20 分钟：基础 10%，超出部分每 10 分钟 + 2%

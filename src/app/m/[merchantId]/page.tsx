@@ -6,7 +6,7 @@ import type { Merchant, Category, MenuItem, CartItem, Order, UserCoupon, Coupon 
 import { formatPrice, isWechat, isValidPhone } from '@/lib/utils'
 import { calcDiscount, getVipLevel, VIP_LEVELS, getPointsToNextLevel, getCouponEligibleAmount } from '@/lib/membership'
 import {
-  Plus, Minus, ShoppingBag, Search, X,
+  Plus, Minus, ShoppingBag, Search, X, CheckCircle,
   MapPin, Phone, User, Clock, Briefcase, UserRound, ArrowRight, Package, Gift, Star, ChevronRight
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -45,6 +45,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const [address, setAddress] = useState('')
   const [scheduledTime, setScheduledTime] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false)
 
   // 进行中的订单（悬浮进度条）
   const [activeOrder, setActiveOrder] = useState<Order | null>(null)
@@ -461,10 +462,15 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       setShowOrderForm(false)
       setCart([])
       setSelectedCoupons([])
-      setCouponManuallySet(false) // 下单后重置，下次重新自动选最优
+      setCouponManuallySet(false)
       localStorage.removeItem(`cart_${merchantId}`)
       localStorage.setItem(`last_order_${merchantId}`, order.id)
-      router.push(`/m/${merchantId}/order/${order.id}`)
+      
+      // 显示成功仪式感动画
+      setShowSuccessAnimation(true)
+      setTimeout(() => {
+        router.push(`/m/${merchantId}/order/${order.id}`)
+      }, 1500)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '下单失败'
       alert(`下单失败: ${msg}`)
@@ -1508,6 +1514,37 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
               {activeOrder.status === 'preparing' && '制作中✨'}
               {activeOrder.status === 'delivering' && '配送中 😋'}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 提交成功仪式感弹窗 (仪式感 优化) */}
+      {showSuccessAnimation && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(255,255,255,0.95)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          backdropFilter: 'blur(5px)',
+          animation: 'fadeIn 0.3s ease'
+        }}>
+          <div style={{
+            width: '80px', height: '80px', borderRadius: '50%', background: '#22c55e',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            marginBottom: '28px', color: 'white',
+            boxShadow: '0 8px 24px rgba(34, 197, 94, 0.3)',
+            animation: 'popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+          }}>
+            <CheckCircle size={48} />
+          </div>
+          <h2 style={{ fontSize: '26px', fontWeight: '900', color: '#111827', marginBottom: '8px' }}>下单成功！</h2>
+          <p style={{ fontSize: '15px', color: '#6b7280' }}>正在为您跳转到订单状态页</p>
+          
+          <div style={{
+            marginTop: '40px', padding: '16px 24px', background: '#f0fdf4',
+            borderRadius: '20px', color: '#15803d', fontSize: '14px', fontWeight: '700',
+            border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '8px'
+          }}>
+            <span>🏃</span> 商家已收到提醒，将尽快为您备餐
           </div>
         </div>
       )}

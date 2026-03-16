@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { AlertTriangle, CheckCircle, ChevronRight, X, Send, MessageSquare } from 'lucide-react'
+import Image from 'next/image'
 import { formatPrice } from '@/lib/utils'
+import { calculateCancellationPenalty } from '@/lib/order'
 import OrderItemsCard from '@/components/OrderItemsCard'
 import type { UsedCoupon } from '@/components/OrderItemsCard'
 import type { Order, Message } from '@/lib/types'
@@ -44,6 +46,7 @@ export default function OrderManagerModal({
   const masterCouponCheckboxRef = useRef<HTMLInputElement>(null)
   const [showCancel, setShowCancel] = useState(false)
   const [isConfirmingStatus, setIsConfirmingStatus] = useState(false)
+  const [suggestedRefund, setSuggestedRefund] = useState<{ rate: number, amount: number, final: number, reason: string } | null>(null)
 
   // 客服聊天（同时接收普通留言与售后流）
   const [messages, setMessages] = useState<Message[]>([])
@@ -81,7 +84,7 @@ export default function OrderManagerModal({
     }
   }, [order, supabase])
 
-  const loadMessages = () => {
+  const loadMessages = useCallback(() => {
     if (!order) return
     supabase
       .from('messages')
@@ -98,7 +101,7 @@ export default function OrderManagerModal({
             .in('id', unreadForMerchant.map((m: Message) => m.id))
         }
       })
-  }
+  }, [order, supabase])
 
   useEffect(() => {
     if (order) {
@@ -111,12 +114,22 @@ export default function OrderManagerModal({
           schema: 'public',
           table: 'messages',
           filter: `order_id=eq.${order.id}`,
-        }, () => loadMessages()) // Reload on new message and mark as read
+        }, (payload) => {
+          const nm = payload.new as Message
+          setMessages(prev => {
+            if (prev.some(m => m.id === nm.id)) return prev
+            return [...prev, nm]
+          })
+          // 标记已读
+          if (nm.sender === 'customer') {
+            supabase.from('messages').update({ is_read_by_merchant: true }).eq('id', nm.id).then()
+          }
+        }) // Reload on new message and mark as read
         .subscribe()
 
       return () => { supabase.removeChannel(channel) }
     }
-  }, [order])
+  }, [order, loadMessages, supabase])
 
   async function sendAfterSalesMessage(content?: string, isClosedObj = false) {
     const text = content || asMsgText.trim()
@@ -258,7 +271,7 @@ export default function OrderManagerModal({
     if (error) {
       alert('处理失败')
     } else {
-      // 退还勾选的优惠券
+      // 1. 退还勾选的优惠券
       if (hasCouponRefund && order.customer_id) {
         await supabase
           .from('user_coupons')
@@ -267,6 +280,20 @@ export default function OrderManagerModal({
           .in('coupon_id', Array.from(selectedCouponRefundIds))
           .eq('status', 'used')
       }
+      
+      // 2. 回退积分（仅当涉及退款时）
+      if (order.customer_id && amt > 0) {
+        const { data: cust } = await supabase.from('customers').select('points').eq('id', order.customer_id).single()
+        if (cust) {
+          // 根据退款性质回退。逻辑：下单加了 floor(total_amount) 分。
+          // 若是全额退款，全扣；若是部分退款，通常也应扣除该单预加的所有积分（因为该单已不是正常完结消费）。
+          const pointsToRollback = Math.floor(Number(order.total_amount))
+          await supabase.from('customers')
+            .update({ points: Math.max(0, (cust.points ?? 0) - pointsToRollback) })
+            .eq('id', order.customer_id)
+        }
+      }
+
       const extInfo = hasCouponRefund ? `\n(已退回 ${
         usedCoupons.filter(c => selectedCouponRefundIds.has(c.id)).map(c => c.title).join('、')
       } 共 ${selectedCouponRefundIds.size} 张优惠券)` : ''
@@ -303,15 +330,26 @@ export default function OrderManagerModal({
     if (error) {
       alert('取消失败')
     } else {
-      // 退还本单使用的所有优惠券
+      // 1. 退还本单使用的所有优惠券
       const couponIds: string[] = order.coupon_ids ?? []
-      if (couponIds.length > 0 && order.customer_id) {
-        await supabase
-          .from('user_coupons')
-          .update({ status: 'unused', used_at: null })
-          .eq('customer_id', order.customer_id)
-          .in('coupon_id', couponIds)
-          .eq('status', 'used')
+      if (order.customer_id) {
+        if (couponIds.length > 0) {
+          await supabase
+            .from('user_coupons')
+            .update({ status: 'unused', used_at: null })
+            .eq('customer_id', order.customer_id)
+            .in('coupon_id', couponIds)
+            .eq('status', 'used')
+        }
+
+        // 2. 回滚积分（全额取消回滚全额积分）
+        const { data: cust } = await supabase.from('customers').select('points').eq('id', order.customer_id).single()
+        if (cust) {
+          const pointsToRollback = Math.floor(Number(order.total_amount))
+          await supabase.from('customers')
+            .update({ points: Math.max(0, (cust.points ?? 0) - pointsToRollback) })
+            .eq('id', order.customer_id)
+        }
       }
       onSuccess()
       onClose()
@@ -364,22 +402,45 @@ export default function OrderManagerModal({
                <div style={{ marginBottom: '10px' }}>
                  <strong style={{ fontSize: '12px', color: '#b91c1c', display: 'block', marginBottom: '4px' }}>凭证照片：</strong>
                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                   {order.after_sales_images.map((url: string, idx: number) => (
-                     <img 
-                       key={idx} 
-                       src={url} 
-                       alt="凭证" 
-                       style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #fca5a5', cursor: 'pointer' }} 
-                       onClick={() => window.open(url, '_blank')}
-                     />
-                   ))}
+                    {order.after_sales_images.map((url: string, idx: number) => (
+                      <div 
+                        key={idx} 
+                        style={{ position: 'relative', width: '60px', height: '60px', border: '1px solid #fca5a5', borderRadius: '4px', overflow: 'hidden', cursor: 'pointer' }}
+                        onClick={() => window.open(url, '_blank')}
+                      >
+                        <Image 
+                          src={url} 
+                          alt="凭证" 
+                          fill 
+                          unoptimized 
+                          style={{ objectFit: 'cover' }} 
+                        />
+                      </div>
+                    ))}
                  </div>
                </div>
              )}
              <button 
                className="btn btn-primary btn-block btn-sm" 
                style={{ background: '#ef4444', borderColor: '#ef4444' }}
-               onClick={() => setShowRefundPanel(true)}
+               onClick={() => {
+                // 自动计算系统建议的违约金与退款额 (新功能：保护商家利益)
+                const res = calculateCancellationPenalty(order)
+                const penaltyAmt = Number(order.total_amount) * res.rate
+                const finalAmt = Math.max(0, Number(order.total_amount) - penaltyAmt)
+                
+                setSuggestedRefund({
+                  rate: res.rate,
+                  amount: penaltyAmt,
+                  final: finalAmt,
+                  reason: res.reason
+                })
+                
+                // 自动预填到输入框
+                setRefundInput(finalAmt.toString())
+                setRefundMode('fixed')
+                setShowRefundPanel(true)
+              }}
              >去处理退款/驳回</button>
            </div>
         )}
@@ -509,9 +570,19 @@ export default function OrderManagerModal({
         {!['completed', 'cancelled'].includes(order.status) && (
           <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
             <button onClick={() => setShowCancel(true)} className="btn btn-danger btn-sm" style={{ flex: 1 }}>取消订单</button>
-            <button onClick={() => requestStatusUpdate()} className="btn btn-primary" style={{ flex: 2 }}>
-              {STATUS_LABELS[STATUS_FLOW[STATUS_FLOW.indexOf(order.status) + 1]] || ''}
-              <ChevronRight size={14} />
+            <button 
+              onClick={() => requestStatusUpdate()} 
+              className="btn btn-primary" 
+              style={{ 
+                flex: 2,
+                opacity: order.after_sales_status === 'pending' ? 0.5 : 1,
+                filter: order.after_sales_status === 'pending' ? 'grayscale(0.5)' : 'none',
+                cursor: order.after_sales_status === 'pending' ? 'not-allowed' : 'pointer'
+              }}
+              disabled={order.after_sales_status === 'pending'}
+            >
+              {order.after_sales_status === 'pending' ? '请先处理售后' : (STATUS_LABELS[STATUS_FLOW[STATUS_FLOW.indexOf(order.status) + 1]] || '')}
+              {order.after_sales_status !== 'pending' && <ChevronRight size={14} />}
             </button>
           </div>
         )}
@@ -548,8 +619,28 @@ export default function OrderManagerModal({
             </div>
             
             <div style={{ marginBottom: '16px', background: '#f8f9fa', padding: '12px', borderRadius: '8px', fontSize: '13px' }}>
-              <div style={{ color: '#666', marginBottom: '4px' }}>订单总额</div>
-              <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--color-primary)' }}>{formatPrice(Number(order.total_amount))}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <span style={{ color: '#666' }}>订单总额</span>
+                <span style={{ fontWeight: '800' }}>{formatPrice(Number(order.total_amount))}</span>
+              </div>
+              {suggestedRefund && suggestedRefund.rate > 0 && (
+                <div style={{ padding: '8px', background: '#fff7ed', borderRadius: '6px', marginTop: '6px', border: '1px dashed #fed7aa' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ea580c', fontWeight: '700', fontSize: '12px' }}>
+                    <span>系统建议扣除损耗 ({(suggestedRefund.rate * 100).toFixed(0)}%)</span>
+                    <span>-{formatPrice(suggestedRefund.amount)}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#9a3412', marginTop: '4px', opacity: 0.8 }}>
+                    原因：{suggestedRefund.reason}
+                  </div>
+                  <div style={{ 
+                    marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #fed7aa',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                  }}>
+                    <span style={{ fontWeight: '700' }}>建议退款金额</span>
+                    <span style={{ fontSize: '15px', fontWeight: '800', color: '#ea580c' }}>{formatPrice(suggestedRefund.final)}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', borderBottom: '1px solid #eee', paddingBottom: '12px' }}>
