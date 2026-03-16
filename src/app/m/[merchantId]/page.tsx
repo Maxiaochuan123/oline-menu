@@ -728,17 +728,34 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             </div>
           )}
 
-          {/* VIP 凑单提示 */}
+          {/* VIP 凑单提示 (优化版：更显眼的渐变背景与进度引导) */}
           {(() => {
             const currentTotalPts = customerPoints + Math.floor(totalAmount);
             const nextLevelInfo = getPointsToNextLevel(currentTotalPts);
             if (!nextLevelInfo) return null;
+
             return (
               <div
                 onClick={() => setShowVipInfo(true)}
-                style={{ fontSize: '11px', color: '#fdba74', cursor: 'pointer', textAlign: 'center', paddingTop: '2px' }}
+                style={{
+                  marginTop: '4px',
+                  padding: '8px 12px',
+                  background: 'linear-gradient(90deg, rgba(251,191,36,0.1), rgba(249,115,22,0.1))',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(249,115,22,0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  animation: 'pulse 2s infinite'
+                }}
               >
-                🔥 再加 ¥{nextLevelInfo.needed.toFixed(0)} 可享 {nextLevelInfo.nextLevel.label} {nextLevelInfo.nextLevel.discount}
+                <span style={{ fontSize: '12px' }}>🔥</span>
+                <span style={{ fontSize: '11px', color: '#fb923c', fontWeight: '700' }}>
+                  再加 ¥{nextLevelInfo.needed.toFixed(0)} 可享 {nextLevelInfo.nextLevel.label} {nextLevelInfo.nextLevel.discount}
+                </span>
+                <ChevronRight size={10} color="#fb923c" />
               </div>
             )
           })()}
@@ -1025,6 +1042,30 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                   <span>应付合计</span>
                   <span style={{ color: 'var(--color-primary)' }}>{formatPrice(finalAmount)}</span>
                 </div>
+
+                {/* 结算页升级提醒（临单提醒） */}
+                {(() => {
+                  const currentTotalPts = customerPoints + Math.floor(totalAmount);
+                  const nextLevelInfo = getPointsToNextLevel(currentTotalPts);
+                  if (nextLevelInfo && nextLevelInfo.needed <= 50) { // 差额小于 50 元时强烈提醒
+                    return (
+                      <div 
+                        onClick={() => setShowOrderForm(false)}
+                        style={{ 
+                          marginTop: '12px', padding: '10px', background: '#fff7ed', 
+                          border: '1px dashed #f97316', borderRadius: '8px', textAlign: 'center',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <span style={{ fontSize: '13px', color: '#c2410c', fontWeight: '700' }}>
+                          🎁 仅差 ¥{nextLevelInfo.needed.toFixed(0)} 即可升级为 {nextLevelInfo.nextLevel.label}！
+                        </span>
+                        <div style={{ fontSize: '11px', color: '#ea580c', marginTop: '2px' }}>点击返回凑单，本单立享 {nextLevelInfo.nextLevel.discount}</div>
+                      </div>
+                    )
+                  }
+                  return null
+                })()}
               </div>
 
               {/* 优惠券选择入口 */}
