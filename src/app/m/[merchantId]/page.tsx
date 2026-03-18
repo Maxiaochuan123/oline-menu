@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useRef, use } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Merchant, Category, MenuItem, CartItem, Order, UserCoupon, Coupon } from '@/lib/types'
+import type { Merchant, Category, MenuItem, CartItem, Order, UserCoupon, Coupon, DisabledDate } from '@/lib/types'
 import { formatPrice, isWechat, isValidPhone } from '@/lib/utils'
 import { calcDiscount, getVipLevel, VIP_LEVELS, getPointsToNextLevel, getCouponEligibleAmount } from '@/lib/membership'
 import {
   Plus, Minus, ShoppingBag, Search, X, CheckCircle,
   MapPin, Phone, User, Clock, Briefcase, UserRound, ArrowRight, Package, Gift, Star, ChevronRight
 } from 'lucide-react'
+import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/common/Toast'
 import WechatGuide from '@/components/customer/WechatGuide'
@@ -24,6 +25,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const [merchant, setMerchant] = useState<Merchant | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [disabledDates, setDisabledDates] = useState<DisabledDate[]>([])
   const [activeCategory, setActiveCategory] = useState<string>('')
   
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -166,12 +168,13 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   }, [phone, supabase])
 
   async function loadData() {
-    const [mRes, cRes, iRes, centerRes] = await Promise.all([
+    const [mRes, cRes, iRes, centerRes, dRes] = await Promise.all([
       supabase.from('merchants').select('*').eq('id', merchantId).single(),
       supabase.from('categories').select('*').eq('merchant_id', merchantId).order('sort_order'),
       supabase.from('menu_items').select('*').eq('merchant_id', merchantId).eq('is_available', true),
       // 注意：全局券在新结构中没有 target_type，或者被置为 null 甚至 'all'。这取决于商家前端建券时的保存。
-      supabase.from('coupons').select('*').eq('merchant_id', merchantId).eq('status', 'active').order('created_at', { ascending: false })
+      supabase.from('coupons').select('*').eq('merchant_id', merchantId).eq('status', 'active').order('created_at', { ascending: false }),
+      supabase.from('disabled_dates').select('*').eq('merchant_id', merchantId)
     ])
 
     if (mRes.data) setMerchant(mRes.data)
@@ -181,6 +184,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     }
     if (iRes.data) setMenuItems(iRes.data)
     if (centerRes.data) setCenterCoupons(centerRes.data)
+    if (dRes.data) setDisabledDates(dRes.data)
     setLoading(false)
   }
 
@@ -384,7 +388,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       let cid = customerId
       const { data: customerData } = await supabase
         .from('customers')
-        .select('id, points')
+        .select('id, points, order_count, total_spent')
         .eq('merchant_id', merchantId)
         .eq('phone', phone)
         .maybeSingle()
@@ -485,25 +489,59 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     }
   }
 
+  // 校验营业状态
+  const checkIsStoreOpen = () => {
+    if (!merchant) return { isOpen: true } // 初始加载中不拦截
+    
+    // 1. 手动强制关店优先级最高
+    if (merchant.is_accepting_orders === false) return { isOpen: false, reason: 'merchant' }
+    
+    // 2. 停业日期检查
+    const todayStr = format(new Date(), 'yyyy-MM-dd')
+    const disabledDate = disabledDates.find(d => d.disabled_date === todayStr)
+    if (disabledDate) return { isOpen: false, reason: 'disabled_date', msg: disabledDate.reason }
+    
+    // 3. 自动定时开启检查
+    if (merchant.business_hours?.is_enabled) {
+      const now = new Date()
+      const nowStr = format(now, 'HH:mm')
+      const { open_time, close_time } = merchant.business_hours
+      if (open_time && close_time && (nowStr < open_time || nowStr > close_time)) {
+        return { isOpen: false, reason: 'hours', open_time, close_time }
+      }
+    }
+    
+    return { isOpen: true }
+  }
+
   if (loading) return <MenuSkeleton />
 
   if (isWechatEnv) return <WechatGuide />
 
-  // 不接单弹窗逻辑
-  if (merchant && !merchant.is_accepting_orders) {
+  const openStatus = checkIsStoreOpen()
+
+  if (!openStatus.isOpen) {
     return (
       <div className="overlay" style={{ background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div className="dialog" style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none' }}>
-          <div style={{ textAlign: 'center' }}>
-            <Clock size={48} color="#f97316" style={{ margin: '0 auto 16px' }} />
-            <h2 style={{ fontSize: '20px', fontWeight: '800', marginBottom: '12px' }}>暂停接单中</h2>
-            <div style={{ 
-              background: '#fff7ed', padding: '16px', borderRadius: '12px', 
-              color: '#c2410c', fontSize: '14px', lineHeight: '1.6' 
-            }}>
-              {merchant.announcement || '商家目前忙碌中，请稍后再来点餐~'}
+        <div className="dialog" style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none', width: '85%', maxWidth: '320px', borderRadius: '24px' }}>
+          <div style={{ textAlign: 'center', padding: '10px' }}>
+            <div style={{ padding: '20px', background: '#fff7ed', borderRadius: '100px', width: 'fit-content', margin: '0 auto 20px' }}>
+              <Clock size={40} color="#f97316" />
             </div>
-            <p style={{ marginTop: '20px', color: '#999', fontSize: '12px' }}>您可以收藏本页，等商家恢复接单后再次访问</p>
+            
+            <h2 style={{ fontSize: '20px', fontWeight: '800', marginBottom: '8px', color: '#1c1917' }}>
+              {openStatus.reason === 'hours' ? '尚未开始营业' : '暂停接单中'}
+            </h2>
+            
+            <p style={{ fontSize: '14px', color: '#78716c', marginBottom: '20px', lineHeight: '1.6' }}>
+              {openStatus.reason === 'hours' && `本店营业时间：${openStatus.open_time} - ${openStatus.close_time}`}
+              {openStatus.reason === 'disabled_date' && (openStatus.msg || '今日店休')}
+              {openStatus.reason === 'merchant' && (merchant?.announcement || '商家目前忙碌中，请稍后再来点餐~')}
+            </p>
+
+            <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #f1f5f9' }}>
+              <p style={{ color: '#999', fontSize: '12px' }}>您可以收藏本页，等开店后再次访问</p>
+            </div>
           </div>
         </div>
       </div>

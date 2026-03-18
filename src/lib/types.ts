@@ -6,6 +6,7 @@ export interface Merchant {
   announcement: string | null
   payment_qr_url: string | null
   payment_qr_urls: { wechat?: string; alipay?: string } | null
+  business_hours: { is_enabled: boolean; open_time: string; close_time: string } | null
   rating?: number | null
   created_at: string
 }

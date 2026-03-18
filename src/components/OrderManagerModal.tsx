@@ -10,6 +10,7 @@ import { calculateCancellationPenalty } from '@/lib/order'
 import OrderItemsCard from '@/components/OrderItemsCard'
 import type { UsedCoupon } from '@/components/OrderItemsCard'
 import type { Order, Message } from '@/lib/types'
+import { MessageBubble } from '@/components/common/MessageBubble'
 import {
   Dialog,
   DialogContent,
@@ -348,15 +349,17 @@ export default function OrderManagerModal({
           .eq('status', 'used')
       }
       
-      // 2. 回退积分（仅当涉及退款时）
+      // 2. 回退积分和其他资产（仅当涉及退款时）
       if (order.customer_id && amt > 0) {
-        const { data: cust } = await supabase.from('customers').select('points').eq('id', order.customer_id).single()
+        const { data: cust } = await supabase.from('customers').select('points, order_count, total_spent').eq('id', order.customer_id).single()
         if (cust) {
-          // 根据退款性质回退。逻辑：下单加了 floor(total_amount) 分。
-          // 若是全额退款，全扣；若是部分退款，通常也应扣除该单预加的所有积分（因为该单已不是正常完结消费）。
           const pointsToRollback = Math.floor(Number(order.total_amount))
           await supabase.from('customers')
-            .update({ points: Math.max(0, (cust.points ?? 0) - pointsToRollback) })
+            .update({ 
+              points: Math.max(0, (cust.points ?? 0) - pointsToRollback),
+              order_count: isFullRefund ? Math.max(0, (cust.order_count ?? 0) - 1) : cust.order_count,
+              total_spent: Math.max(0, (cust.total_spent ?? 0) - amt)
+            })
             .eq('id', order.customer_id)
         }
       }
@@ -411,12 +414,16 @@ export default function OrderManagerModal({
             .eq('status', 'used')
         }
 
-        // 2. 回滚积分（全额取消回滚全额积分）
-        const { data: cust } = await supabase.from('customers').select('points').eq('id', order.customer_id).single()
+        // 2. 回滚积分和其他资产（全额取消回滚全额积分和额度）
+        const { data: cust } = await supabase.from('customers').select('points, order_count, total_spent').eq('id', order.customer_id).single()
         if (cust) {
           const pointsToRollback = Math.floor(Number(order.total_amount))
           await supabase.from('customers')
-            .update({ points: Math.max(0, (cust.points ?? 0) - pointsToRollback) })
+            .update({ 
+              points: Math.max(0, (cust.points ?? 0) - pointsToRollback),
+              order_count: Math.max(0, (cust.order_count ?? 0) - 1),
+              total_spent: Math.max(0, (cust.total_spent ?? 0) - Number(order.total_amount))
+            })
             .eq('id', order.customer_id)
         }
       }
@@ -608,31 +615,12 @@ export default function OrderManagerModal({
                     <div className="space-y-3 py-2">
                       {messages.length === 0 ? (
                         <div className="text-center text-slate-400 text-xs py-12 italic font-medium">暂无沟通记录</div>
-                      ) : messages.map(msg => {
-                        const isMerc = msg.sender === 'merchant'
-                        const isAfterSales = msg.msg_type === 'after_sales'
+                      ) : messages.map((msg, idx) => {
+                        const prevMsg = idx > 0 ? messages[idx - 1] : null
+                        const showTime = !prevMsg || (new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() > 5 * 60 * 1000)
+                        
                         return (
-                          <div key={msg.id} className={cn("flex", isMerc ? "justify-end" : "justify-start")}>
-                            <div className="max-w-[85%] space-y-0.5">
-                              {msg.sender === 'customer' && msg.rating && (
-                                <p className="text-[10px] text-amber-500 font-black ml-1">客户评价 {msg.rating} 星 ⭐</p>
-                              )}
-                              <div className={cn(
-                                "px-3 py-1.5 rounded-2xl text-[13px] leading-relaxed font-medium transition-all shadow-sm ring-1",
-                                isMerc 
-                                  ? "bg-orange-500 text-white rounded-tr-none ring-orange-500 ml-auto" 
-                                  : "bg-slate-100 text-slate-800 rounded-tl-none ring-slate-200",
-                                isAfterSales && !isMerc && "bg-red-50 text-red-900 ring-red-100"
-                              )}>
-                                {isAfterSales && !isMerc && <div className="text-[10px] font-black mb-0.5 opacity-80 uppercase flex items-center gap-1"><AlertTriangle size={10} /> 售后争议</div>}
-                                {isAfterSales && isMerc && <div className="text-[10px] font-black mb-0.5 opacity-80 uppercase flex items-center gap-1"><MessageSquare size={10} /> 售后处理</div>}
-                                {msg.content}
-                              </div>
-                              <p className={cn("text-[9px] text-slate-400 font-bold px-1.5 mt-0.5", isMerc ? "text-right" : "text-left")}>
-                                {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                              </p>
-                            </div>
-                          </div>
+                          <MessageBubble key={msg.id} msg={msg} currentUserRole="merchant" showTime={showTime} />
                         )
                       })}
                       <div ref={endOfMessagesRef} />

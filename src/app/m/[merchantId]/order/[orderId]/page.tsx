@@ -15,6 +15,7 @@ import Image from 'next/image'
 import React from 'react'
 import OrderItemsCard from '@/components/OrderItemsCard'
 import type { UsedCoupon } from '@/components/OrderItemsCard'
+import { MessageBubble } from '@/components/common/MessageBubble'
 
 const STATUS_MAP: Record<string, { label: string, color: string, step: number }> = {
   pending: { label: '待收单', color: '#f97316', step: 1 },
@@ -323,12 +324,18 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
           .eq('status', 'used')
       }
       
-      // 回退积分（按订单实付金额 1:1 回退）
-      const { data: cust } = await supabase.from('customers').select('points').eq('id', order.customer_id).single()
+      // 回退积分和其他资产（全额退款则全扣，部分退款扣全分但差额扣金额）
+      const { data: cust } = await supabase.from('customers').select('points, order_count, total_spent').eq('id', order.customer_id).single()
       if (cust) {
         const pointsToRollback = Math.floor(Number(order.total_amount))
+        // 取消扣违约金时视作部分退款，如果不用违约金则视作全额退款
+        const isFullRefund = penaltyAmount === 0
         await supabase.from('customers')
-          .update({ points: Math.max(0, (cust.points ?? 0) - pointsToRollback) })
+          .update({ 
+            points: Math.max(0, (cust.points ?? 0) - pointsToRollback),
+            order_count: isFullRefund ? Math.max(0, (cust.order_count ?? 0) - 1) : cust.order_count,
+            total_spent: Math.max(0, (cust.total_spent ?? 0) - refundAmount)
+          })
           .eq('id', order.customer_id)
       }
     }
@@ -1029,69 +1036,11 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
               <div style={{ textAlign: 'center', color: '#aaa', fontSize: '13px', padding: '20px 0' }}>
                 还没有沟通记录喔，如有问题可以随时留言
               </div>
-            ) : messages.map(msg => {
-              const isCust = msg.sender === 'customer'
-              const isAfterSales = msg.msg_type === 'after_sales'
-              const isClosed = msg.msg_type === 'after_sales_closed'
-              
-              return (
-                <div key={msg.id} style={{ display: 'flex', justifyContent: isCust ? 'flex-end' : 'flex-start', marginBottom: '16px' }}>
-                  <div style={{ maxWidth: '85%' }}>
-                    {/* 特型展示：如果是客户发出的带评价信息 */}
-                    {isCust && msg.rating && (
-                      <div style={{ display: 'flex', gap: '2px', marginBottom: '4px', justifyContent: 'flex-end' }}>
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <Star key={i} size={14} fill={i < msg.rating! ? '#f59e0b' : 'none'} color={i < msg.rating! ? '#f59e0b' : '#d1d5db'} />
-                        ))}
-                      </div>
-                    )}
-                    
-                    {/* 气泡本体 */}
-                    <div style={{
-                      padding: '12px 16px',
-                      borderRadius: isCust ? '20px 4px 20px 20px' : '4px 20px 20px 20px',
-                      background: isAfterSales ? (isCust ? '#ef4444' : '#fee2e2') : (isCust ? 'var(--color-primary)' : 'white'),
-                      color: isAfterSales ? (isCust ? 'white' : '#991b1b') : (isCust ? 'white' : '#1c1917'),
-                      boxShadow: isCust ? 'none' : '0 2px 8px rgba(0,0,0,0.04)',
-                      border: isCust ? 'none' : isAfterSales ? '1px solid #fca5a5' : '1px solid #f0f0f0',
-                      fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap',
-                      position: 'relative',
-                      overflow: 'hidden'
-                    }}>
-                      {/* 如果是系统特殊事件消息添加打眼标识 */}
-                      {isAfterSales && isCust && <div style={{ fontSize: '12px', fontWeight: '800', marginBottom: '4px', opacity: 0.9 }}>🚨 发起售后争议</div>}
-                      {isAfterSales && !isCust && (
-                        <div style={{ 
-                          fontSize: '11px', fontWeight: '800', marginBottom: '6px', 
-                          color: '#dc2626', display: 'flex', alignItems: 'center', gap: '4px',
-                          background: 'rgba(220, 38, 38, 0.1)', padding: '4px 8px', borderRadius: '4px',
-                          marginLeft: '-4px', marginRight: '-4px'
-                        }}>
-                          <AlertCircle size={14} /> 商家协商确认
-                        </div>
-                      )}
-                      {isClosed && <div style={{ fontSize: '12px', fontWeight: '800', marginBottom: '4px', color: '#10b981' }}>✅ 纠纷已完结</div>}
-                      
-                      {/* 消息内容渲染，对包含金额的文本加粗 */}
-                      {msg.content.includes('退款') || msg.content.includes('金额') ? (
-                        <div style={{ fontWeight: !isCust && isAfterSales ? '600' : '400' }}>
-                          {msg.content}
-                        </div>
-                      ) : msg.content}
+            ) : messages.map((msg, idx) => {
+              const prevMsg = idx > 0 ? messages[idx - 1] : null
+              const showTime = !prevMsg || (new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() > 5 * 60 * 1000)
 
-                      {/* 商家协商卡片装饰线 */}
-                      {!isCust && isAfterSales && (
-                        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '4px', background: '#dc2626' }} />
-                      )}
-                    </div>
-                    
-                    <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px', textAlign: isCust ? 'right' : 'left' }}>
-                      {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                      {!isCust && <span style={{ marginLeft: '4px', color: isAfterSales ? '#dc2626' : '#10b981', fontWeight: '600' }}>商家{isAfterSales ? '处理中' : ''}</span>}
-                    </div>
-                  </div>
-                </div>
-              )
+              return <MessageBubble key={msg.id} msg={msg} currentUserRole="customer" showTime={showTime} />
             })}
           </div>
 

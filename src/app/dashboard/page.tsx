@@ -6,15 +6,20 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import type { Merchant, Order } from '@/lib/types'
-import { formatPrice, speak, lastFourDigits } from '@/lib/utils'
+import { formatPrice, speak, lastFourDigits, cn } from '@/lib/utils'
 import {
   Menu, X, LogOut, UtensilsCrossed, ClipboardList, Users,
   ChefHat, TrendingUp, Clock, Copy, Check, Settings, MessageSquare, Tag,
   Star
 } from 'lucide-react'
 import Link from 'next/link'
-import OrderManagerModal from '../../components/OrderManagerModal'
+import OrderManagerModal from '@/components/OrderManagerModal'
 import OrderCard from '@/components/OrderCard'
+import { Card, CardContent } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
 
 
 export default function DashboardPage() {
@@ -87,6 +92,7 @@ export default function DashboardPage() {
   }, [supabase, router])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData()
   }, [loadData])
 
@@ -147,12 +153,12 @@ export default function DashboardPage() {
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `merchant_id=eq.${merchant.id}` },
         (payload) => {
-          const newMsg = payload.new as any
+          const newMsg = payload.new as Record<string, unknown>
           if (newMsg.sender === 'customer') {
             setUnreadMsgCount(c => c + 1)
-            setUnreadOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id]))
-            if (newMsg.msg_type === 'after_sales' || newMsg.content.includes('协商退单')) {
-              setNegotiatingOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id]))
+            setUnreadOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id as string]))
+            if (newMsg.msg_type === 'after_sales' || (typeof newMsg.content === 'string' && newMsg.content.includes('协商退单'))) {
+              setNegotiatingOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id as string]))
             }
             speak('口讯口讯，有新留言啊！')
           }
@@ -205,8 +211,8 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-        <span className="spinner" />
+      <div className="flex items-center justify-center h-screen bg-slate-50">
+        <div className="spinner" />
       </div>
     )
   }
@@ -215,231 +221,240 @@ export default function DashboardPage() {
   const todayRevenue = completedOrders.reduce((sum, o) => sum + Number(o.total_amount), 0)
   const pendingCount = todayOrders.filter(o => o.status === 'pending' || o.after_sales_status === 'pending').length
 
+  const NAV_ITEMS = [
+    { href: '/menu', icon: <UtensilsCrossed size={22} className="text-orange-500" />, bg: 'bg-orange-50', label: '菜单管理', desc: '管理菜品和分类' },
+    { 
+      href: '/orders', 
+      icon: <ClipboardList size={22} className="text-blue-500" />, 
+      bg: 'bg-blue-50', 
+      label: '订单管理', 
+      desc: '查看和处理订单',
+      badge: pendingAfterSalesCount > 0 ? `待售后 (${pendingAfterSalesCount})` : null
+    },
+    { href: '/customers', icon: <Users size={22} className="text-emerald-500" />, bg: 'bg-emerald-50', label: '客户管理', desc: '客户信息和积分' },
+    { href: '/settings', icon: <Settings size={22} className="text-purple-500" />, bg: 'bg-purple-50', label: '店铺设置', desc: '接单控制、收款码' },
+    { href: '/coupons', icon: <Tag size={22} className="text-amber-500" />, bg: 'bg-amber-50', label: '优惠券', desc: '创建和管理优惠券' },
+    { 
+      href: '/messages', 
+      icon: <MessageSquare size={22} className="text-rose-500" />, 
+      bg: 'bg-rose-50', 
+      label: '客户消息', 
+      desc: '评论与留言',
+      count: unreadMsgCount
+    },
+  ]
+
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
+    <div className="min-h-screen bg-slate-50/50 font-sans pb-20">
       {/* 顶部栏 */}
-      <header style={{
-        background: 'white',
-        padding: '14px 20px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        borderBottom: '1px solid var(--color-border)',
-        position: 'sticky', top: 0, zIndex: 10,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <ChefHat size={24} color="#f59e0b" />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontWeight: '800', fontSize: '18px', color: '#1c1917' }}>
+      <header className="fixed top-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-100 px-5 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="rounded-full size-10 text-slate-700 bg-slate-100/50 hover:bg-slate-100 active:scale-95 transition-transform shrink-0"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <Menu size={20} />
+          </Button>
+          <div className="flex flex-col">
+            <h1 className="text-[17px] font-black text-slate-900 leading-none flex items-center gap-1.5">
               {merchant?.shop_name}
-            </span>
-            {merchant?.rating && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>
-                <Star fill="#f59e0b" color="#f59e0b" size={12} />
-                <span style={{ fontSize: '12px', color: '#d97706', fontWeight: '800' }}>{merchant.rating.toFixed(1)}</span>
-              </div>
-            )}
+              {merchant?.rating && (
+                <div className="flex items-center gap-0.5 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100">
+                  <Star fill="#f59e0b" className="text-amber-500" size={10} />
+                  <span className="text-[10px] text-amber-600 font-black">{merchant.rating.toFixed(1)}</span>
+                </div>
+              )}
+            </h1>
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">商家管理后台</span>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            onClick={copyShareLink}
-            className="btn btn-sm"
-            style={{
-              background: copied ? '#22c55e' : '#f59e0b',
-              color: 'white', border: 'none',
-            }}
-          >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-            {copied ? '已复制' : '分享链接'}
-          </button>
-        </div>
+        
+        <Button 
+          variant={copied ? "default" : "outline"}
+          size="sm"
+          onClick={copyShareLink}
+          className={cn(
+            "rounded-full font-black text-xs transition-all duration-300",
+            copied ? "bg-emerald-500 hover:bg-emerald-600 border-none px-4 shadow-lg shadow-emerald-200" : "bg-white shadow-sm"
+          )}
+        >
+          {copied ? <Check size={14} className="mr-1" /> : <Copy size={14} className="mr-1" />}
+          {copied ? '已复制' : '分享链接'}
+        </Button>
       </header>
 
-      {/* 数据概览 */}
-      <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '24px', fontWeight: '700', color: '#f59e0b' }}>
-            {todayOrders.length}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>今日订单</div>
-        </div>
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '24px', fontWeight: '700', color: '#22c55e' }}>
-            {formatPrice(todayRevenue)}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>今日营收</div>
-        </div>
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '24px', fontWeight: '700', color: pendingCount > 0 ? '#ef4444' : '#a8a29e' }}>
-            {pendingCount}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>待处理</div>
-        </div>
-      </div>
-
-      {/* 快捷导航 */}
-      <div style={{ padding: '0 20px 16px', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-        <Link href="/menu" style={{ textDecoration: 'none' }}>
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <UtensilsCrossed size={22} color="#f59e0b" />
-            </div>
-            <div>
-              <div style={{ fontWeight: '600', fontSize: '15px' }}>菜单管理</div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>管理菜品和分类</div>
-            </div>
-          </div>
-        </Link>
-        <Link href="/orders" style={{ textDecoration: 'none' }}>
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <ClipboardList size={22} color="#3b82f6" />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: '600', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                <span style={{ whiteSpace: 'nowrap' }}>订单管理</span>
-                {pendingAfterSalesCount > 0 && (
-                  <span className="tag tag-status tag-pulse-red" style={{ transform: 'scale(0.85)', transformOrigin: 'left center' }}>
-                    ! 待售后 ({pendingAfterSalesCount})
-                  </span>
-                )}
+      {/* 主体内容 */}
+      <main className="pt-20 max-w-2xl mx-auto px-4 space-y-8">
+        {/* 数据概览 */}
+        <section className="grid grid-cols-3 gap-3">
+          <Card className="border-none shadow-sm ring-1 ring-slate-100 bg-white rounded-3xl overflow-hidden transition-all active:scale-[0.98]">
+            <CardContent className="p-5 text-center flex flex-col items-center justify-center">
+              <div className="size-8 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-2">
+                <ClipboardList size={16} />
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>查看和处理订单</div>
-            </div>
+              <p className="text-2xl font-black text-slate-900 leading-none">{todayOrders.length}</p>
+              <p className="text-[11px] font-bold text-slate-400 mt-1.5">今日订单</p>
+            </CardContent>
+          </Card>
+          <Card className="border-none shadow-sm ring-1 ring-slate-100 bg-white rounded-3xl overflow-hidden transition-all active:scale-[0.98]">
+            <CardContent className="p-5 text-center flex flex-col items-center justify-center">
+               <div className="size-8 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-2">
+                <span className="font-black text-sm">¥</span>
+              </div>
+              <p className="text-xl font-black text-emerald-600 leading-none">{formatPrice(todayRevenue).replace('¥', '')}</p>
+              <p className="text-[11px] font-bold text-slate-400 mt-1.5">今日营收</p>
+            </CardContent>
+          </Card>
+          <Card className={cn(
+            "border-none shadow-sm ring-1 rounded-3xl overflow-hidden transition-all active:scale-[0.98]",
+            pendingCount > 0 ? "ring-orange-200 bg-orange-50/50" : "ring-slate-100 bg-white"
+          )}>
+            <CardContent className="p-5 text-center flex flex-col items-center justify-center">
+              <div className={cn(
+                "size-8 rounded-full flex items-center justify-center mb-2",
+                pendingCount > 0 ? "bg-orange-100 text-orange-600" : "bg-slate-50 text-slate-400"
+              )}>
+                <Clock size={16} />
+              </div>
+              <p className={cn(
+                "text-2xl font-black leading-none",
+                pendingCount > 0 ? "text-orange-600 animate-pulse" : "text-slate-400"
+              )}>{pendingCount}</p>
+              <p className={cn(
+                "text-[11px] font-bold mt-1.5",
+                pendingCount > 0 ? "text-orange-500" : "text-slate-400"
+              )}>待处理</p>
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* 最新订单列表 */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-[17px] font-black text-slate-900 tracking-tight flex items-center gap-2">
+              <Clock size={20} className="text-slate-400" />
+              最近订单
+              {todayOrders.length > 0 && (
+                <Badge variant="secondary" className="bg-slate-100 text-slate-500 font-black h-5 px-2 rounded-full">
+                  前 5 单
+                </Badge>
+              )}
+            </h2>
           </div>
-        </Link>
-        <Link href="/customers" style={{ textDecoration: 'none' }}>
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Users size={22} color="#22c55e" />
-            </div>
-            <div>
-              <div style={{ fontWeight: '600', fontSize: '15px' }}>客户管理</div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>客户信息和积分</div>
-            </div>
-          </div>
-        </Link>
-        <Link href="/settings" style={{ textDecoration: 'none' }}>
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#faf5ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Settings size={22} color="#7c3aed" />
-            </div>
-            <div>
-              <div style={{ fontWeight: '600', fontSize: '15px' }}>店铺设置</div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>接单控制、收款码</div>
-            </div>
-          </div>
-        </Link>
-        <Link href="/coupons" style={{ textDecoration: 'none' }}>
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Tag size={22} color="#f59e0b" />
-            </div>
-            <div>
-              <div style={{ fontWeight: '600', fontSize: '15px' }}>优惠券</div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>创建和管理优惠券</div>
-            </div>
-          </div>
-        </Link>
-        <Link href="/messages" style={{ textDecoration: 'none' }}>
-          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', position: 'relative' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <MessageSquare size={22} color="#ef4444" />
-            </div>
-            <div>
-              <div style={{ fontWeight: '600', fontSize: '15px' }}>客户消息</div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>评论与留言</div>
-            </div>
-            {unreadMsgCount > 0 && (
-              <span style={{
-                position: 'absolute', top: '8px', right: '8px',
-                background: '#ef4444', color: 'white',
-                borderRadius: '20px', padding: '2px 7px',
-                fontSize: '11px', fontWeight: '700',
-              }}>{unreadMsgCount}</span>
+          
+          <div className="space-y-3">
+            {todayOrders.length === 0 ? (
+              <div className="py-10 flex flex-col items-center justify-center text-center bg-white rounded-2xl border border-dashed border-slate-200 shadow-sm">
+                <div className="size-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                  <TrendingUp className="text-slate-200" size={32} />
+                </div>
+                <p className="text-slate-600 font-black">今天还没有订单</p>
+                <p className="text-[11px] text-slate-400 font-medium mt-1">分享链接开始接单吧</p>
+              </div>
+            ) : (
+              [...todayOrders].sort((a, b) => {
+                if (a.after_sales_status === 'pending' && b.after_sales_status !== 'pending') return -1;
+                if (a.after_sales_status !== 'pending' && b.after_sales_status === 'pending') return 1;
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+              }).slice(0, 5).map(order => (
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  isUrgent={order.after_sales_status === 'pending' || negotiatingOrderIds.has(order.id)}
+                  isNegotiating={negotiatingOrderIds.has(order.id)}
+                  isNewMessage={unreadOrderIds.has(order.id)}
+                  onClick={() => setSelectedOrder(order)}
+                />
+              ))
             )}
           </div>
-        </Link>
-      </div>
+        </section>
 
-      {/* 最新订单 */}
-      <div style={{ padding: '0 20px 100px' }}>
-        <h2 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Clock size={18} /> 最新订单
-        </h2>
-        {todayOrders.length === 0 ? (
-          <div className="empty-state">
-            <TrendingUp />
-            <p>今天还没有订单</p>
-            <p style={{ fontSize: '13px', marginTop: '4px' }}>分享链接给客户开始接单吧！</p>
+        {/* 快捷导航 */}
+        <section>
+          <h2 className="text-[15px] font-black text-slate-900 tracking-tight mb-3 px-1">快捷功能</h2>
+          <div className="grid grid-cols-3 gap-3">
+            {NAV_ITEMS.map((item) => (
+              <Link key={item.href} href={item.href} className="group no-underline relative">
+                <div className="flex flex-col items-center gap-2 p-3 rounded-3xl bg-transparent transition-all duration-300 active:scale-95 active:bg-slate-100/50">
+                  <div className={cn("size-[52px] rounded-[1.25rem] flex items-center justify-center shrink-0 shadow-sm", item.bg)}>
+                    {item.icon}
+                  </div>
+                  <span className="text-[11px] font-black text-slate-700 tracking-tighter whitespace-nowrap text-center">
+                    {item.label}
+                  </span>
+
+                  {/* 角标提醒 */}
+                  {item.badge ? (
+                    <span className="absolute top-2 right-3 translate-x-1/2 flex h-5 min-w-[20px] animate-pulse items-center justify-center rounded-full bg-orange-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-sm">
+                      !
+                    </span>
+                  ) : (item.count !== undefined && item.count > 0) ? (
+                    <span className="absolute top-2 right-3 translate-x-1/2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-sm">
+                      {item.count}
+                    </span>
+                  ) : null}
+                </div>
+              </Link>
+            ))}
           </div>
-        ) : (
-          [...todayOrders].sort((a, b) => {
-            if (a.after_sales_status === 'pending' && b.after_sales_status !== 'pending') return -1;
-            if (a.after_sales_status !== 'pending' && b.after_sales_status === 'pending') return 1;
-            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-          }).slice(0, 5).map(order => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              isUrgent={order.after_sales_status === 'pending' || negotiatingOrderIds.has(order.id)}
-              isNegotiating={negotiatingOrderIds.has(order.id)}
-              isNewMessage={unreadOrderIds.has(order.id)}
-              onClick={() => setSelectedOrder(order)}
-            />
-          ))
-        )}
-      </div>
+        </section>
+      </main>
 
-      {/* 悬浮按钮 */}
-      <button className="fab" onClick={() => setSidebarOpen(true)}>
-        <Menu size={24} />
-      </button>
-
-      {/* 侧边栏 */}
+      {/* 侧边栏菜单 (手写适配) */}
       {sidebarOpen && (
         <>
-          <div className="overlay" onClick={() => setSidebarOpen(false)} />
-          <div className="sidebar animate-fade-in">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-              <h3 style={{ fontSize: '18px', fontWeight: '700' }}>{merchant?.shop_name}</h3>
-              <button onClick={() => setSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-                <X size={22} />
-              </button>
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 transition-opacity" onClick={() => setSidebarOpen(false)} />
+          <div className="fixed top-0 left-0 h-full w-[280px] bg-white shadow-2xl z-50 p-6 flex flex-col font-sans animate-in slide-in-from-left duration-300">
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-2">
+                <div className="size-8 bg-orange-500 rounded-lg flex items-center justify-center shrink-0">
+                  <ChefHat size={18} className="text-white" />
+                </div>
+                <span className="font-black text-slate-900 truncate max-w-[160px]">{merchant?.shop_name}</span>
+              </div>
+              <Button variant="ghost" size="icon-sm" onClick={() => setSidebarOpen(false)} className="rounded-full active:bg-slate-100 shrink-0">
+                <X size={20} className="text-slate-500" />
+              </Button>
             </div>
-            <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {[
-                { href: '/dashboard', icon: <TrendingUp size={20} />, label: '仪表盘' },
-                { href: '/menu', icon: <UtensilsCrossed size={20} />, label: '菜单管理' },
-                { href: '/orders', icon: <ClipboardList size={20} />, label: '订单管理' },
-                { href: '/customers', icon: <Users size={20} />, label: '客户管理' },
-                { href: '/coupons', icon: <Tag size={20} />, label: '优惠券' },
-                { href: '/settings', icon: <Settings size={20} />, label: '店铺设置' },
-              ].map(item => (
-                <Link key={item.href} href={item.href} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px',
-                    borderRadius: '10px', transition: 'background 0.2s', cursor: 'pointer',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#f5f5f4')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = '')}
-                  >
-                    {item.icon}
-                    <span style={{ fontWeight: '500' }}>{item.label}</span>
-                  </div>
-                </Link>
-              ))}
-            </nav>
-            <div style={{ position: 'absolute', bottom: '24px', left: '24px', right: '24px' }}>
-              <button onClick={handleLogout} className="btn btn-outline btn-block" style={{ color: '#ef4444' }}>
-                <LogOut size={16} /> 退出登录
-              </button>
-            </div>
+
+            <ScrollArea className="flex-1 -mx-4 px-4 overflow-y-auto">
+              <nav className="space-y-1">
+                {[
+                  { href: '/dashboard', icon: <TrendingUp size={18} />, label: '仪表盘' },
+                  { href: '/menu', icon: <UtensilsCrossed size={18} />, label: '菜单管理' },
+                  { href: '/orders', icon: <ClipboardList size={18} />, label: '订单管理' },
+                  { href: '/customers', icon: <Users size={18} />, label: '客户管理' },
+                  { href: '/coupons', icon: <Tag size={18} />, label: '优惠券' },
+                  { href: '/settings', icon: <Settings size={18} />, label: '店铺设置' },
+                ].map(item => (
+                  <Link key={item.href} href={item.href} className="no-underline">
+                    <div className="flex items-center gap-3 px-4 py-3.5 rounded-xl active:bg-slate-50 transition-colors group">
+                      <div className="text-slate-400 group-active:text-orange-500 transition-colors">{item.icon}</div>
+                      <span className="font-bold text-slate-700 group-active:text-slate-900">{item.label}</span>
+                    </div>
+                  </Link>
+                ))}
+              </nav>
+            </ScrollArea>
+
+            <Separator className="my-6 opacity-50" />
+            
+            <Button 
+              variant="outline" 
+              className="mt-auto w-full flex items-center justify-center gap-2 border-slate-100 text-rose-500 active:bg-rose-50 active:border-rose-100 font-black h-12 transition-all rounded-xl"
+              onClick={handleLogout}
+            >
+              <LogOut size={16} />
+              退出登录
+            </Button>
           </div>
         </>
       )}
 
+      {/* 详情弹窗 */}
       {selectedOrder && (
         <OrderManagerModal 
           order={selectedOrder} 

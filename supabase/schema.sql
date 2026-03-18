@@ -13,6 +13,7 @@ CREATE TABLE merchants (
   announcement TEXT,
   payment_qr_url TEXT,
   payment_qr_urls JSONB,
+  business_hours JSONB DEFAULT '{"is_enabled": false, "open_time": "09:00", "close_time": "21:00"}',
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

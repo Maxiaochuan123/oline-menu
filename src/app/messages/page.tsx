@@ -2,14 +2,21 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import type { Message } from '@/lib/types'
-import { ArrowLeft, MessageSquare, Star, Send, CheckCheck } from 'lucide-react'
+import type { Message, Order } from '@/lib/types'
+import { ArrowLeft, MessageSquare, Send, User, Phone, X, ShoppingBag } from 'lucide-react'
+import { MessageBubble } from '@/components/common/MessageBubble'
+import OrderManagerModal from '@/components/OrderManagerModal'
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
+import { format } from "date-fns"
 
 interface MessageGroup {
   order_id: string
+  order: Order
   customer_name: string
   phone: string
   messages: Message[]
@@ -23,14 +30,26 @@ export default function MessagesPage() {
   const [groups, setGroups] = useState<MessageGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedGroup, setSelectedGroup] = useState<MessageGroup | null>(null)
+  const [showOrderModal, setShowOrderModal] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    if (selectedGroup) {
+      setTimeout(scrollToBottom, 100)
+    }
+  }, [selectedGroup?.messages])
 
   const loadMessages = useCallback(async (mid: string) => {
     // 获取该商家所有消息，关联 orders 取客户信息
     const { data } = await supabase
       .from('messages')
-      .select('*, orders(customer_name, phone)')
+      .select('*, orders(*)')
       .eq('merchant_id', mid)
       .order('created_at', { ascending: true })
 
@@ -39,10 +58,11 @@ export default function MessagesPage() {
     // 按 order_id 分组
     const map: Record<string, MessageGroup> = {}
     for (const msg of data) {
-      const order = (msg as Message & { orders?: { customer_name: string; phone: string } }).orders
+      const order = msg.orders as unknown as Order
       if (!map[msg.order_id]) {
         map[msg.order_id] = {
           order_id: msg.order_id,
+          order: order,
           customer_name: order?.customer_name || '未知客户',
           phone: order?.phone || '',
           messages: [],
@@ -131,180 +151,196 @@ export default function MessagesPage() {
   const totalUnread = groups.reduce((s, g) => s + g.unreadCount, 0)
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-      <span className="spinner" />
+    <div className="flex items-center justify-center min-h-screen bg-slate-50/50">
+      <div className="spinner border-orange-500" />
     </div>
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
-      <header style={{
-        background: 'white', padding: '14px 20px',
-        display: 'flex', alignItems: 'center', gap: '10px',
-        borderBottom: '1px solid var(--color-border)',
-        position: 'sticky', top: 0, zIndex: 10,
-      }}>
-        <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-          <ArrowLeft size={22} color="#1c1917" />
-        </button>
-        <span style={{ fontWeight: '700', fontSize: '17px' }}>客户消息</span>
-        {totalUnread > 0 && (
-          <span style={{
-            background: '#ef4444', color: 'white',
-            borderRadius: '20px', padding: '2px 8px',
-            fontSize: '12px', fontWeight: '700',
-          }}>{totalUnread} 未读</span>
-        )}
+    <div className="min-h-screen bg-slate-50/50 font-sans pb-20 text-slate-900">
+      {/* 顶部导航 */}
+      <header className="fixed top-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-3">
+          <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition-colors active:scale-95">
+            <ArrowLeft size={20} className="text-slate-600" />
+          </button>
+          <div className="flex flex-col">
+            <h1 className="text-base font-black tracking-tight leading-none flex items-center gap-2">
+              客户消息
+              {totalUnread > 0 && (
+                <span className="bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm shadow-rose-200 animate-pulse">
+                  {totalUnread} 未读
+                </span>
+              )}
+            </h1>
+          </div>
+        </div>
       </header>
 
-      <div style={{ padding: '12px 16px 80px' }}>
+      {/* 消息列表区 */}
+      <main className="px-4 pt-20 pb-6 max-w-2xl mx-auto">
         {groups.length === 0 ? (
-          <div className="empty-state">
-            <MessageSquare />
-            <p>暂无客户消息</p>
+          <div className="flex flex-col items-center justify-center text-center py-20 bg-white rounded-[2.5rem] border-2 border-dashed border-slate-100 shadow-sm mt-4">
+            <div className="size-20 bg-slate-50 rounded-full flex items-center justify-center mb-5 ring-8 ring-slate-50/50">
+              <MessageSquare size={40} className="text-slate-300" />
+            </div>
+            <h3 className="font-black text-slate-900 text-lg">暂无客户消息</h3>
+            <p className="text-xs text-slate-400 font-medium mt-1 uppercase tracking-widest">随时准备为您解答</p>
           </div>
         ) : (
-          groups.map(group => (
-            <div
-              key={group.order_id}
-              className="card"
-              style={{
-                marginBottom: '10px', cursor: 'pointer',
-                borderLeft: group.unreadCount > 0 ? '3px solid #ef4444' : '3px solid #e5e7eb',
-                background: group.unreadCount > 0 ? '#fff5f5' : 'white',
-              }}
-              onClick={() => openGroup(group)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>
-                    {group.customer_name}
-                    <span style={{ fontSize: '12px', color: '#999', fontWeight: '400', marginLeft: '6px' }}>{group.phone}</span>
-                  </div>
-                  {/* 最新一条消息预览 */}
-                  {group.messages.length > 0 && (() => {
-                    const last = group.messages[group.messages.length - 1]
-                    return (
-                      <div style={{ fontSize: '13px', color: '#666', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '200px' }}>
-                        {last.sender === 'merchant' ? '我：' : ''}{last.content}
-                      </div>
-                    )
-                  })()}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                  {group.unreadCount > 0 && (
-                    <span style={{
-                      background: '#ef4444', color: 'white',
-                      borderRadius: '50%', width: '20px', height: '20px',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '11px', fontWeight: '700',
-                    }}>{group.unreadCount}</span>
+          <div className="space-y-3">
+            {groups.map(group => {
+              const lastMsg = group.messages[group.messages.length - 1]
+              return (
+                <div
+                  key={group.order_id}
+                  onClick={() => openGroup(group)}
+                  className={cn(
+                    "group relative bg-white rounded-3xl p-4 flex gap-4 transition-all duration-300 hover:shadow-xl hover:-translate-y-0.5 cursor-pointer active:scale-[0.98]",
+                    group.unreadCount > 0 ? "border-2 border-rose-100 shadow-sm shadow-rose-50" : "border border-slate-100"
                   )}
-                  <span style={{ fontSize: '11px', color: '#999' }}>
-                    {group.messages.length} 条
-                  </span>
+                >
+                  {/* 头像区域 */}
+                  <div className="relative shrink-0">
+                    <div className={cn(
+                      "size-12 rounded-2xl flex items-center justify-center text-white shadow-inner",
+                      group.unreadCount > 0 ? "bg-gradient-to-br from-rose-400 to-rose-500" : "bg-gradient-to-br from-slate-200 to-slate-300"
+                    )}>
+                      <User size={24} />
+                    </div>
+                    {group.unreadCount > 0 && (
+                      <div className="absolute -top-1 -right-1 size-5 bg-white rounded-full flex items-center justify-center">
+                        <span className="size-4 bg-rose-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold ring-2 ring-white">
+                          {group.unreadCount}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 内容区域 */}
+                  <div className="flex-1 min-w-0 flex flex-col justify-center">
+                    <div className="flex items-center justify-between mb-1">
+                      <h3 className="font-bold text-slate-900 truncate pr-2">{group.customer_name}</h3>
+                      {lastMsg && (
+                        <span className="text-[11px] text-slate-400 whitespace-nowrap shrink-0">
+                          {format(new Date(lastMsg.created_at), 'HH:mm')}
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 truncate text-sm text-slate-500 font-medium">
+                        {lastMsg ? (
+                          <span className={cn(group.unreadCount > 0 && "text-rose-600 font-semibold")}>
+                            {lastMsg.sender === 'merchant' ? '我: ' : ''}{lastMsg.content}
+                          </span>
+                        ) : '暂无消息'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </main>
+
+      {/* 聊天抽屉 */}
+      {selectedGroup && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end pointer-events-none">
+          {/* 背景遮罩 */}
+          <div 
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity pointer-events-auto animate-in fade-in duration-300"
+            onClick={() => setSelectedGroup(null)}
+          />
+          
+          {/* 抽屉主体 */}
+          <div className="relative w-full max-w-2xl mx-auto bg-slate-50 rounded-t-[2.5rem] flex flex-col pointer-events-auto h-[85vh] animate-in slide-in-from-bottom-[100%] duration-300 shadow-2xl overflow-hidden">
+            {/* 抽屉头部 */}
+            <div className="bg-white/80 backdrop-blur-md px-6 py-4 flex items-center justify-between border-b border-slate-100 z-10 sticky top-0 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="size-10 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500">
+                  <User size={20} />
+                </div>
+                <div>
+                  <h2 className="font-black text-slate-900 leading-tight">{selectedGroup.customer_name}</h2>
+                  <div className="flex items-center gap-1 text-[11px] text-slate-500 mt-0.5 font-medium">
+                    <Phone size={10} />
+                    <span>{selectedGroup.phone}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* 对话详情抽屉 */}
-      {selectedGroup && (
-        <>
-          <div className="overlay" style={{ zIndex: 100 }} onClick={() => setSelectedGroup(null)} />
-          <div style={{
-            position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 110,
-            background: 'white', borderRadius: '20px 20px 0 0',
-            maxHeight: '80vh', display: 'flex', flexDirection: 'column',
-            boxShadow: '0 -4px 30px rgba(0,0,0,0.15)',
-          }}>
-            {/* 抽屉头 */}
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
-              <div style={{ fontWeight: '700', fontSize: '16px' }}>{selectedGroup.customer_name}</div>
-              <div style={{ fontSize: '12px', color: '#999' }}>{selectedGroup.phone}</div>
+              <div className="flex items-center gap-2">
+                <Button 
+                  onClick={() => setShowOrderModal(true)}
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full h-8 px-3 text-xs font-bold text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900 shadow-sm"
+                >
+                  <ShoppingBag size={14} className="mr-1.5" />
+                  查看订单
+                </Button>
+                <button 
+                  onClick={() => setSelectedGroup(null)}
+                  className="size-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 hover:text-slate-700 transition-colors active:scale-95"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             {/* 消息列表 */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-              {selectedGroup.messages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} />
-              ))}
+            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+              {selectedGroup.messages.map((msg, idx) => {
+                const prevMsg = idx > 0 ? selectedGroup.messages[idx - 1] : null
+                const showTime = !prevMsg || (new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() > 5 * 60 * 1000)
+
+                return (
+                  <MessageBubble key={msg.id} msg={msg} currentUserRole="merchant" showTime={showTime} />
+                )
+              })}
+              <div ref={messagesEndRef} />
             </div>
 
-            {/* 回复输入框 */}
-            <div style={{
-              padding: '12px 16px',
-              borderTop: '1px solid var(--color-border)',
-              display: 'flex', gap: '8px', alignItems: 'flex-end',
-              flexShrink: 0,
-            }}>
-              <textarea
-                value={replyText}
-                onChange={e => setReplyText(e.target.value)}
-                placeholder="回复客户..."
-                rows={2}
-                style={{
-                  flex: 1, border: '1px solid var(--color-border)',
-                  borderRadius: '12px', padding: '10px 12px',
-                  resize: 'none', fontSize: '14px', fontFamily: 'inherit',
-                  outline: 'none',
-                }}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() } }}
-              />
-              <button
-                onClick={sendReply}
-                disabled={sending || !replyText.trim()}
-                className="btn btn-primary"
-                style={{ height: '44px', width: '44px', padding: 0, borderRadius: '50%', flexShrink: 0 }}
-              >
-                <Send size={18} />
-              </button>
+            {/* 输入区 */}
+            <div className="bg-white border-t border-slate-100 p-3 pb-safe shrink-0">
+              <div className="flex items-end gap-2 bg-slate-50 rounded-3xl p-1.5 border border-slate-200/60 focus-within:border-orange-300 focus-within:ring-4 focus-within:ring-orange-500/10 transition-all">
+                <Textarea
+                  value={replyText}
+                  onChange={e => setReplyText(e.target.value)}
+                  placeholder="回复客户..."
+                  className="flex-1 min-h-[44px] max-h-[120px] bg-transparent border-none shadow-none resize-none py-3 px-4 text-[15px] placeholder:text-slate-400 focus-visible:ring-0"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      sendReply()
+                    }
+                  }}
+                />
+                <Button
+                  onClick={sendReply}
+                  disabled={sending || !replyText.trim()}
+                  className="h-11 w-11 shrink-0 rounded-full bg-orange-500 hover:bg-orange-600 text-white shadow-md shadow-orange-200 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 p-0"
+                >
+                  {sending ? <div className="spinner size-4 border-2 border-white/30 border-t-white" /> : <Send size={18} className="ml-1" />}
+                </Button>
+              </div>
             </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
-  )
-}
 
-function MessageBubble({ msg }: { msg: Message }) {
-  const isMerchant = msg.sender === 'merchant'
-  return (
-    <div style={{
-      display: 'flex',
-      justifyContent: isMerchant ? 'flex-end' : 'flex-start',
-      marginBottom: '12px',
-    }}>
-      <div style={{ maxWidth: '75%' }}>
-        {/* 星级评分（仅客户带评分的消息显示） */}
-        {!isMerchant && msg.rating && (
-          <div style={{ display: 'flex', gap: '2px', marginBottom: '4px' }}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Star key={i} size={14} fill={i < msg.rating! ? '#f97316' : 'none'} color={i < msg.rating! ? '#f97316' : '#d1d5db'} />
-            ))}
-          </div>
-        )}
-        <div style={{
-          padding: '10px 14px',
-          borderRadius: isMerchant ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
-          background: isMerchant ? 'var(--color-primary)' : '#f3f4f6',
-          color: isMerchant ? 'white' : '#1c1917',
-          fontSize: '14px', lineHeight: '1.5',
-        }}>
-          {msg.content}
-        </div>
-        <div style={{
-          fontSize: '11px', color: '#9ca3af', marginTop: '3px',
-          textAlign: isMerchant ? 'right' : 'left',
-          display: 'flex', alignItems: 'center', gap: '3px',
-          justifyContent: isMerchant ? 'flex-end' : 'flex-start',
-        }}>
-          {new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-          {isMerchant && msg.is_read_by_customer && <CheckCheck size={12} color="#22c55e" />}
-        </div>
-      </div>
+      {/* 订单详情弹窗 */}
+      {showOrderModal && selectedGroup?.order && (
+        <OrderManagerModal
+          order={selectedGroup.order}
+          onClose={() => setShowOrderModal(false)}
+          onSuccess={() => {
+            setShowOrderModal(false)
+            if (merchantId) loadMessages(merchantId)
+          }}
+        />
+      )}
     </div>
   )
 }

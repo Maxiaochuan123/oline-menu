@@ -7,10 +7,14 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import type { Merchant, Order } from '@/lib/types'
 import { lastFourDigits } from '@/lib/utils'
-import { ArrowLeft, Clock } from 'lucide-react'
+import { ArrowLeft, Clock, Search, User, ChevronDown, ChevronUp, ShoppingBag, History, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import OrderManagerModal from '@/components/OrderManagerModal'
-import OrderCard from '@/components/OrderCard'
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent } from "@/components/ui/card"
+import { cn, formatPrice } from '@/lib/utils'
 
 
 
@@ -20,6 +24,8 @@ export default function OrdersPage() {
   const [merchant, setMerchant] = useState<Merchant | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set())
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [, setTick] = useState(0)
 
@@ -94,92 +100,234 @@ export default function OrdersPage() {
     setSelectedOrder(order)
   }
 
-  function requestStatusUpdate(order: Order) {
-    if (order.after_sales_status === 'pending') {
-      alert('该订单尚有纠纷未处理完结，请先点击详情查阅并完结售后，再推进订单流程。')
-      return
-    }
-    // 状态推进逻辑不再直接在此处理，交由组件或保留底层刷新
-  }
-
   const loadOrders = () => loadData()
 
   // 售后相关逻辑已整体移至 OrderManagerModal
 
-  if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}><span className="spinner" /></div>
+  const toggleExpand = (phone: string) => {
+    setExpandedPhones(prev => {
+      const next = new Set(prev)
+      if (next.has(phone)) next.delete(phone)
+      else next.add(phone)
+      return next
+    })
   }
 
-  const activeOrders = orders
-    .filter(o => !['completed', 'cancelled'].includes(o.status) || o.after_sales_status === 'pending')
+  // --- 状态工具 ---
+  const STATUS_LABELS: Record<string, string> = {
+    pending: '待处理',
+    preparing: '制作中',
+    delivering: '配送中',
+    completed: '已完成',
+    cancelled: '已取消'
+  }
+  const STATUS_COLORS: Record<string, string> = {
+    pending: "bg-amber-100 text-amber-700",
+    preparing: "bg-blue-100 text-blue-700",
+    delivering: "bg-purple-100 text-purple-700",
+    completed: "bg-emerald-100 text-emerald-700",
+    cancelled: "bg-zinc-100 text-zinc-700",
+  }
+
+  // --- 数据分组逻辑 ---
+  const orderGroups = orders.reduce((acc, order) => {
+    if (!acc[order.phone]) {
+      acc[order.phone] = {
+        phone: order.phone,
+        name: order.customer_name,
+        orders: [],
+        hasActive: false,
+        hasUrgent: false
+      }
+    }
+    acc[order.phone].orders.push(order)
+    if (!['completed', 'cancelled'].includes(order.status) || order.after_sales_status === 'pending') {
+      acc[order.phone].hasActive = true
+    }
+    if (order.after_sales_status === 'pending') {
+      acc[order.phone].hasUrgent = true
+    }
+    return acc
+  }, {} as Record<string, { phone: string, name: string, orders: Order[], hasActive: boolean, hasUrgent: boolean }>)
+
+  // 排序并转换数组
+  const sortedGroups = Object.values(orderGroups)
+    .map(group => ({
+      ...group,
+      orders: group.orders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+      latest: group.orders.reduce((prev, curr) => new Date(curr.created_at) > new Date(prev.created_at) ? curr : prev)
+    }))
+    .filter(g => g.name.toLowerCase().includes(search.toLowerCase()) || g.phone.includes(search))
     .sort((a, b) => {
-      if (a.after_sales_status === 'pending' && b.after_sales_status !== 'pending') return -1;
-      if (a.after_sales_status !== 'pending' && b.after_sales_status === 'pending') return 1;
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      // 优待售后申请
+      if (a.hasUrgent && !b.hasUrgent) return -1
+      if (!a.hasUrgent && b.hasUrgent) return 1
+      // 其次是进行中任务
+      if (a.hasActive && !b.hasActive) return -1
+      if (!a.hasActive && b.hasActive) return 1
+      // 最后按最新订单时间
+      return new Date(b.latest.created_at).getTime() - new Date(a.latest.created_at).getTime()
     })
-  const historyOrders = orders.filter(o => ['completed', 'cancelled'].includes(o.status) && o.after_sales_status !== 'pending')
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-50">
+        <div className="spinner" />
+      </div>
+    )
+  }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
-      <header style={{
-        background: 'white', padding: '14px 20px',
-        display: 'flex', alignItems: 'center', gap: '10px',
-        borderBottom: '1px solid var(--color-border)', position: 'sticky', top: 0, zIndex: 10,
-      }}>
-        <Link href="/dashboard"><ArrowLeft size={22} color="#1c1917" /></Link>
-        <span style={{ fontWeight: '700', fontSize: '17px' }}>订单管理</span>
-        <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>({activeOrders.length} 进行中)</span>
+    <div className="min-h-screen bg-slate-50/50 font-sans pb-20 text-slate-900">
+      {/* 顶部导航 */}
+      <header className="fixed top-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-4 px-5 py-3 shadow-sm shadow-black/5">
+        <Link href="/dashboard" className="p-2 -ml-2 hover:bg-slate-100 rounded-full transition-colors">
+          <ArrowLeft size={20} className="text-slate-600" />
+        </Link>
+        <div className="flex flex-col">
+          <h1 className="text-base font-black tracking-tight leading-none">订单管理</h1>
+        </div>
       </header>
 
-      <div style={{ padding: '16px 20px 100px' }}>
-        {/* 进行中订单 */}
-        {activeOrders.length > 0 && (
-          <>
-            <h3 style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-secondary)', marginBottom: '10px' }}>进行中</h3>
-                {activeOrders.map(order => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                isUrgent={order.after_sales_status === 'pending'}
-                showProgress={true}
-                onClick={openOrder}
-                onStatusUpdate={requestStatusUpdate}
-              />
-            ))}
-          </>
-        )}
+      <main className="pt-20 px-5 max-w-2xl mx-auto space-y-4">
+        {/* 搜索栏 */}
+        <div className="sticky top-16 z-30 py-2 bg-slate-50/50 backdrop-blur-sm -mx-5 px-5">
+          <div className="relative group">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+            <Input 
+              placeholder="搜索下单人姓名、手机号..." 
+              value={search} 
+              onChange={e => setSearch(e.target.value)}
+              className="h-12 pl-10 pr-4 rounded-[1.5rem] bg-white border-slate-100 shadow-sm focus-visible:ring-orange-500 transition-all font-bold placeholder:font-medium"
+            />
+          </div>
+        </div>
 
-        {/* 历史订单 */}
-        {historyOrders.length > 0 && (
-          <>
-            <h3 style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-secondary)', margin: '20px 0 10px' }}>历史订单</h3>
-            {historyOrders.slice(0, 20).map(order => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                opacity={0.65}
-                onClick={openOrder}
-              />
-            ))}
-          </>
-        )}
+        {/* 订单分组列表 */}
+        {sortedGroups.map(group => {
+          const isExpanded = expandedPhones.has(group.phone)
+          return (
+            <Card key={group.phone} className={cn(
+              "overflow-hidden border-none shadow-sm ring-1 ring-black/5 transition-all",
+              group.hasUrgent ? "ring-rose-200 bg-rose-50/20" : "bg-white"
+            )}>
+              <CardContent className="p-0">
+                {/* 用户摘要头部 */}
+                <div 
+                  onClick={() => toggleExpand(group.phone)}
+                  className="p-4 flex items-center gap-4 cursor-pointer hover:bg-slate-50/50 transition-colors"
+                >
+                  <div className={cn(
+                    "size-12 rounded-2xl flex items-center justify-center shrink-0 shadow-inner",
+                    group.hasUrgent ? "bg-rose-100 text-rose-500" : (group.hasActive ? "bg-orange-100 text-orange-500" : "bg-slate-100 text-slate-400")
+                  )}>
+                    <User size={24} strokeWidth={2.5} />
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                       <span className="font-black text-base text-slate-900 truncate">{group.name}</span>
+                       <Badge variant="secondary" className="bg-slate-100 text-slate-500 font-bold text-[10px] h-4.5 px-1.5 border-none shrink-0">
+                        {group.orders.length} 单回顾
+                       </Badge>
+                       {group.hasUrgent && (
+                         <Badge className="bg-rose-500 text-white text-[9px] font-black h-4 px-1.5 animate-pulse shrink-0">售后处理中</Badge>
+                       )}
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] font-bold text-slate-400 mt-0.5">
+                      <span className="tracking-tight">{group.phone}</span>
+                      <div className="size-1 bg-slate-200 rounded-full" />
+                      <span className="flex items-center gap-1"><Clock size={10} /> 最近: {new Date(group.latest.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  </div>
 
-        {orders.length === 0 && (
-          <div className="empty-state">
-            <Clock />
-            <p>暂无订单</p>
+                  <div className="text-slate-300">
+                    {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                  </div>
+                </div>
+
+                {/* 进行中的订单/最新订单快速入口 */}
+                {!isExpanded && (
+                  <div className="px-4 pb-4">
+                    <div 
+                      onClick={() => openOrder(group.latest)}
+                      className={cn(
+                        "p-4 rounded-3xl border flex items-center justify-between group active:scale-[0.98] transition-all",
+                        group.latest.after_sales_status === 'pending' ? "bg-rose-50 border-rose-200 shadow-sm" : "bg-slate-50/50 border-slate-100"
+                      )}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge className={cn("text-[9px] font-black uppercase h-4.5 px-2", STATUS_COLORS[group.latest.status])}>
+                            {STATUS_LABELS[group.latest.status]}
+                          </Badge>
+                          <span className="text-[13px] font-black text-slate-700 tracking-tight">尾号 {lastFourDigits(group.latest.phone)} · {formatPrice(Number(group.latest.total_amount))}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-bold truncate max-w-[200px]">
+                          {group.latest.address}
+                        </p>
+                      </div>
+                      <Button variant="ghost" size="sm" className="rounded-xl font-black text-orange-600 hover:bg-orange-100/50">
+                        详情
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 展开的历史订单列表 */}
+                {isExpanded && (
+                  <div className="px-4 pb-5 border-t border-slate-100 pt-3 space-y-2.5 animate-in slide-in-from-top-1 duration-200">
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                      <History size={12} className="text-slate-300" />
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">全量订单历史记录</span>
+                    </div>
+                    {group.orders.map(order => (
+                      <div 
+                        key={order.id}
+                        onClick={() => openOrder(order)}
+                        className="flex items-center justify-between p-3.5 bg-slate-50/80 rounded-2xl hover:bg-slate-100 transition-colors cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={cn("size-2 rounded-full", STATUS_COLORS[order.status].split(' ')[0])} />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[13px] font-black text-slate-700">尾号 {lastFourDigits(order.phone)} 订单</span>
+                              <span className="text-[11px] font-bold text-slate-400">{new Date(order.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <p className="text-[10px] font-bold text-slate-400 mt-0.5">{STATUS_LABELS[order.status]} · {formatPrice(Number(order.total_amount))}</p>
+                          </div>
+                        </div>
+                        <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-600 transition-colors" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )
+        })}
+
+        {sortedGroups.length === 0 && (
+          <div className="flex flex-col items-center justify-center text-center py-24 bg-white rounded-[2.5rem] border-2 border-dashed border-slate-100 shadow-sm">
+            <div className="size-24 bg-slate-50 rounded-full flex items-center justify-center mb-6 ring-8 ring-slate-50/50">
+              <ShoppingBag size={48} className="text-slate-200" />
+            </div>
+            <h3 className="font-black text-slate-900 text-lg">暂无匹配订单</h3>
+            <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-1">请尝试搜索其他关键字</p>
           </div>
         )}
-      </div>
+      </main>
 
-      <OrderManagerModal 
-        order={selectedOrder} 
-        onClose={() => setSelectedOrder(null)} 
-        onSuccess={() => {
-          setSelectedOrder(null)
-          loadOrders()
-        }}
-      />
+      {selectedOrder && (
+        <OrderManagerModal 
+          order={selectedOrder} 
+          onClose={() => setSelectedOrder(null)} 
+          onSuccess={() => {
+            setSelectedOrder(null)
+            loadOrders()
+          }}
+        />
+      )}
     </div>
   )
 }
