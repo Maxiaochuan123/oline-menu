@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, use } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Merchant, Category, MenuItem, CartItem, Order, UserCoupon, Coupon, DisabledDate } from '@/lib/types'
-import { formatPrice, isWechat, isValidPhone } from '@/lib/utils'
+import { formatPrice, isWechat, isValidPhone, cn } from '@/lib/utils'
 import { calcDiscount, getVipLevel, VIP_LEVELS, getPointsToNextLevel, getCouponEligibleAmount } from '@/lib/membership'
 import {
   Plus, Minus, ShoppingBag, Search, X, CheckCircle,
@@ -15,6 +15,7 @@ import { useToast } from '@/components/common/Toast'
 import WechatGuide from '@/components/customer/WechatGuide'
 import NewItemsCarousel from '@/components/customer/NewItemsCarousel'
 import MenuSkeleton from '@/components/customer/MenuSkeleton'
+import DraggableCouponButton from '@/components/customer/DraggableCouponButton'
 
 export default function ClientMenuPage({ params }: { params: Promise<{ merchantId: string }> }) {
   const { merchantId } = use(params)
@@ -367,9 +368,12 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     vipLevel.rate < 1,
     !!(selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0),
     availableCoupons.length > 0 && selectedCoupons.length === 0,
-    customerPoints + Math.floor(totalAmount) < 100,
+    !!couponHint,
+    (customerPoints + Math.floor(totalAmount) < 100) || !!getPointsToNextLevel(customerPoints + Math.floor(totalAmount)),
   ].filter(Boolean).length : 0
-  const bottomBarHeight = totalCount > 0 ? 56 + (discountRowCount > 0 ? discountRowCount * 22 + 16 : 0) : 0
+  
+  // 基础 56px + (每行32px + 底部留白20px)
+  const bottomBarHeight = totalCount > 0 ? 72 + (discountRowCount > 0 ? discountRowCount * 32 + 24 : 0) : 0
 
   async function handleSubmitOrder() {
     if (!customerName || !phone || !address || !scheduledTime) {
@@ -568,87 +572,91 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   })
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* 搜索栏 */}
-      <header style={{ 
-        padding: '16px 16px 12px', background: 'white', 
-        borderBottom: '1px solid var(--color-border)', flexShrink: 0 
-      }}>
-        {/* 商家品牌与信用分展示 (P12-E) */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <div style={{ fontSize: '18px', fontWeight: '800', color: '#1c1917', display: 'flex', alignItems: 'center', gap: '8px' }}>
+    <div className="h-[100dvh] flex flex-col bg-slate-50 font-sans overflow-hidden">
+      {/* 搜索栏与头部 */}
+      <header className="bg-white/80 backdrop-blur-md px-4 pt-4 pb-3 border-b border-slate-100 shrink-0 z-20">
+        {/* 商家品牌与信用分展示 */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-[17px] font-black text-slate-900 flex items-center gap-2">
             {merchant?.shop_name}
             {merchant?.rating && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>
-                <Star fill="#f59e0b" color="#f59e0b" size={12} />
-                <span style={{ fontSize: '12px', color: '#d97706', fontWeight: '700' }}>{merchant.rating.toFixed(1)}</span>
+              <div className="flex items-center gap-0.5 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100 shadow-sm">
+                <Star fill="#f59e0b" className="text-amber-500" size={12} />
+                <span className="text-[11px] text-amber-600 font-bold">{merchant.rating.toFixed(1)}</span>
               </div>
             )}
           </div>
         </div>
 
-        <div style={{ position: 'relative', marginBottom: (centerCoupons.length > 0 || allMyCoupons.length > 0) ? '12px' : 0 }}>
-          <Search size={16} color="#a8a29e" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+        <div className={cn("relative", (centerCoupons.length > 0 || allMyCoupons.length > 0) ? "mb-3" : "mb-0")}>
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input 
-            className="input" 
+            className="w-full bg-slate-100/50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl pl-9 pr-4 py-2.5 text-sm transition-all" 
             placeholder={`搜索${merchant?.shop_name}的菜品...`}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ paddingLeft: '36px', height: '40px' }}
           />
         </div>
 
         {/* 首页快捷入口区 */}
-        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+        <div className="flex gap-2 mt-3">
           {/* 领券中心 */}
           <div 
             onClick={() => setShowCouponCenter(true)}
-            style={{ 
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
-              background: '#fff7ed', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer'
-            }}
+            className="flex-1 flex items-center justify-between bg-gradient-to-r from-orange-50 to-orange-100/50 p-2.5 rounded-2xl cursor-pointer active:scale-95 transition-all shadow-sm border border-orange-100/50"
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Gift size={20} color="#ea580c" />
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                <span style={{ fontSize: '13px', color: '#c2410c', fontWeight: '600', display: 'flex', alignItems: 'center' }}>
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 bg-white rounded-xl shadow-sm">
+                <Gift size={18} className="text-orange-500" />
+              </div>
+              <div className="flex flex-col items-start">
+                <span className="text-sm text-orange-700 font-black flex items-center tracking-tight">
                   领券中心
-                  {claimableCoupons.length > 0 && <span style={{ marginLeft: '4px', background: '#ea580c', color: 'white', padding: '1px 4px', borderRadius: '8px', fontSize: '10px' }}>{claimableCoupons.length}待领</span>}
+                  {claimableCoupons.length > 0 && (
+                    <span className="ml-1.5 bg-orange-500 text-white px-1.5 py-0.5 rounded-full text-[9px] shadow-sm animate-pulse">
+                      {claimableCoupons.length}待领
+                    </span>
+                  )}
                 </span>
-                <span style={{ fontSize: '11px', color: '#ea580c', opacity: 0.8 }}>我的卡券 ({availableCoupons.length})</span>
+                <span className="text-[10px] text-orange-600/80 font-bold mt-0.5">我的卡券 ({availableCoupons.length})</span>
               </div>
             </div>
-            <ChevronRight size={14} color="#ea580c" />
+            <ChevronRight size={16} className="text-orange-400 mr-1" />
           </div>
 
           {/* 历史订单 */}
           <div 
             onClick={() => router.push(`/m/${merchantId}/orders`)}
-            style={{ 
-              flexShrink: 0, width: '90px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', 
-              background: '#f8fafc', border: '1px solid #f1f5f9', padding: '8px 4px', borderRadius: '8px', cursor: 'pointer', gap: '4px', color: '#475569'
-            }}
+            className="shrink-0 w-[72px] flex flex-col items-center justify-center bg-white border border-slate-100 rounded-2xl cursor-pointer active:scale-95 transition-all shadow-sm gap-1"
           >
-            <Briefcase size={18} />
-            <span style={{ fontSize: '12px', fontWeight: '600' }}>历史订单</span>
+            <Briefcase size={16} className="text-slate-500" />
+            <span className="text-[10px] font-black text-slate-600 tracking-tighter">历史订单</span>
           </div>
         </div>
       </header>
 
       {/* 客户端主布局 */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="flex-1 flex overflow-hidden">
         {/* 左侧分类 */}
         {!search && (
-          <div className="menu-categories">
+          <div className="w-[84px] bg-slate-100/50 overflow-y-auto custom-scrollbar shrink-0 pb-32">
             {categories.map(cat => (
               <div 
                 key={cat.id} 
-                className={`category-tab ${activeCategory === cat.id ? 'active' : ''}`}
+                className={cn(
+                  "px-3 py-4 text-[13px] font-bold transition-all cursor-pointer relative",
+                  activeCategory === cat.id 
+                    ? "bg-white text-slate-900" 
+                    : "text-slate-500 hover:bg-slate-100"
+                )}
                 onClick={() => {
                   setActiveCategory(cat.id)
                   itemsRef.current[cat.id]?.scrollIntoView({ behavior: 'smooth' })
                 }}
               >
+                {activeCategory === cat.id && (
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-orange-500 rounded-r-full" />
+                )}
                 {cat.name}
               </div>
             ))}
@@ -656,63 +664,69 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         )}
 
         {/* 右侧菜品 */}
-        <div className="menu-items" style={{ paddingBottom: `${bottomBarHeight + 16}px` }}>
+        <div className="flex-1 overflow-y-auto px-3 pb-32 scroll-smooth bg-white" style={{ paddingBottom: `${bottomBarHeight + 16}px` }}>
           {categories.map(cat => {
             const itemsInCat = filteredItems.filter(i => i.category_id === cat.id)
             if (itemsInCat.length === 0) return null
             return (
-              <div key={cat.id} ref={el => { itemsRef.current[cat.id] = el }}>
-                <h3 style={{ fontSize: '14px', fontWeight: '700', padding: '12px 0 8px', color: '#78716c' }}>
+              <div key={cat.id} ref={el => { itemsRef.current[cat.id] = el }} className="pt-2">
+                <h3 className="text-sm font-black text-slate-800 py-3 sticky top-0 bg-white/90 backdrop-blur-sm z-10">
                   {cat.name}
                 </h3>
-                {itemsInCat.map(item => (
-                  <div key={item.id} style={{ 
-                    display: 'flex', gap: '12px', padding: '12px', background: 'white',
-                    borderRadius: '12px', marginBottom: '10px'
-                  }}>
-                    <div style={{ 
-                      width: '80px', height: '80px', borderRadius: '8px',
-                      background: item.image_url ? `url(${item.image_url}) center/cover` : '#f5f5f4',
-                      flexShrink: 0 
-                    }} />
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                      <div style={{ fontWeight: '700', fontSize: '15px' }}>{item.name}</div>
-                      <div style={{ 
-                        fontSize: '12px', color: '#a8a29e', flex: 1,
-                        overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box',
-                        WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginTop: '2px'
-                      }}>
-                        {item.description}
+                <div className="space-y-4">
+                  {itemsInCat.map(item => (
+                    <div key={item.id} className="flex gap-3 relative group">
+                      <div className="w-[88px] h-[88px] rounded-2xl bg-slate-100 shrink-0 overflow-hidden relative">
+                        {item.image_url ? (
+                          <div className="w-full h-full bg-center bg-cover transition-transform duration-500 group-active:scale-105" style={{ backgroundImage: `url(${item.image_url})` }} />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-slate-300">
+                            <span className="text-[10px] uppercase font-bold tracking-widest">No img</span>
+                          </div>
+                        )}
+                        {item.is_new && (!item.new_until || new Date(item.new_until) > new Date()) && (
+                          <div className="absolute top-0 left-0 bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-br-lg rounded-tl-2xl">新品</div>
+                        )}
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                        <span style={{ color: 'var(--color-primary)', fontWeight: '800', fontSize: '16px' }}>
-                          {formatPrice(item.price)}
-                        </span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {cart.find(i => i.menuItem.id === item.id) && (
-                            <>
-                              <button 
-                                onClick={() => removeFromCart(item.id)}
-                                style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid #d1d5db', background: 'white', padding: 0 }}
-                              >
-                                <Minus size={14} color="#666" style={{ margin: 'auto' }} />
-                              </button>
-                              <span style={{ fontSize: '14px', fontWeight: '600', width: '20px', textAlign: 'center' }}>
-                                {cart.find(i => i.menuItem.id === item.id)?.quantity}
-                              </span>
-                            </>
-                          )}
-                          <button 
-                            onClick={() => addToCart(item)}
-                            style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--color-primary)', color: 'white', border: 'none', padding: 0 }}
-                          >
-                            <Plus size={14} style={{ margin: 'auto' }} />
-                          </button>
+                      
+                      <div className="flex-1 flex flex-col min-w-0 py-0.5">
+                        <div className="font-black text-[15px] text-slate-900 leading-tight mb-1">{item.name}</div>
+                        <div className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed flex-1">
+                          {item.description || '暂无描述'}
+                        </div>
+                        
+                        <div className="flex justify-between items-center mt-2">
+                          <span className="text-orange-500 font-black text-base flex items-baseline">
+                            <span className="text-[11px] mr-0.5">¥</span>
+                            {item.price}
+                          </span>
+                          
+                          <div className="flex items-center gap-3">
+                            {cart.find(i => i.menuItem.id === item.id) && (
+                              <>
+                                <button 
+                                  onClick={() => removeFromCart(item.id)}
+                                  className="size-6 rounded-full border border-slate-200 bg-white flex items-center justify-center text-slate-600 active:scale-90 transition-transform shadow-sm"
+                                >
+                                  <Minus size={14} />
+                                </button>
+                                <span className="text-[13px] font-black w-4 text-center">
+                                  {cart.find(i => i.menuItem.id === item.id)?.quantity}
+                                </span>
+                              </>
+                            )}
+                            <button 
+                              onClick={() => addToCart(item)}
+                              className="size-6 rounded-full bg-orange-500 flex items-center justify-center text-white active:scale-90 transition-transform shadow-md shadow-orange-200"
+                            >
+                              <Plus size={14} strokeWidth={3} />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )
           })}
@@ -721,20 +735,15 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
       {/* 折扣明细栏（独立浮在购物车栏上方） */}
       {totalCount > 0 && (vipLevel.rate < 1 || selectedCoupons.length > 0 || (availableCoupons.length > 0 && selectedCoupons.length === 0) || (customerPoints + Math.floor(totalAmount) < 100) || couponHint) && (
-        <div style={{
-          position: 'fixed', bottom: '56px', left: 0, right: 0, zIndex: 19,
-          background: '#1c1917', padding: '8px 16px',
-          display: 'flex', flexDirection: 'column', gap: '4px',
-          borderTop: '1px solid rgba(255,255,255,0.08)'
-        }}>
+        <div className="fixed bottom-[calc(72px+env(safe-area-inset-bottom,0px))] left-0 right-0 z-20 bg-[#1c1917] pt-3 px-4 pb-5 flex flex-col gap-1 border-t border-white/5 shadow-[0_-4px_12px_rgba(0,0,0,0.2)]">
           {/* VIP 折扣行 */}
           {vipLevel.rate < 1 && (
             <div
               onClick={() => setShowVipInfo(true)}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', cursor: 'pointer' }}
+              className="flex justify-between items-center text-xs cursor-pointer hover:opacity-80 transition-opacity"
             >
-              <span style={{ color: '#4ade80' }}>⭐ {vipLevel.label} {vipLevel.discount}</span>
-              <span style={{ color: '#4ade80', fontWeight: '600' }}>-¥{vipDiscountAmount.toFixed(2)}</span>
+              <span className="text-emerald-400 font-medium">⭐ {vipLevel.label} {vipLevel.discount}</span>
+              <span className="text-emerald-400 font-bold">-¥{vipDiscountAmount.toFixed(2)}</span>
             </div>
           )}
 
@@ -742,10 +751,10 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           {selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0 && (
             <div
               onClick={() => setShowCouponPicker(true)}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', cursor: 'pointer' }}
+              className="flex justify-between items-center text-xs cursor-pointer hover:opacity-80 transition-opacity"
             >
-              <span style={{ color: '#fbbf24' }}>🎫 {selectedCoupons.map(c => c.coupon?.title).join(' + ') || '优惠券'}</span>
-              <span style={{ color: '#fbbf24', fontWeight: '600' }}>-¥{discountResult.couponDiscountAmount.toFixed(2)}</span>
+              <span className="text-amber-400 font-medium">🎫 {selectedCoupons.map(c => c.coupon?.title).join(' + ') || '优惠券'}</span>
+              <span className="text-amber-400 font-bold">-¥{discountResult.couponDiscountAmount.toFixed(2)}</span>
             </div>
           )}
 
@@ -757,19 +766,22 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             return (
               <div
                 onClick={() => setShowCouponPicker(true)}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', cursor: 'pointer' }}
+                className="flex justify-between items-center text-xs cursor-pointer text-amber-500/80"
               >
-                <span style={{ color: trulyAvailableCount > 0 ? '#fb923c' : '#aaa' }}>🎫 {trulyAvailableCount > 0 ? `有 ${trulyAvailableCount} 张券可用` : '查看不可用券'}</span>
-                <ChevronRight size={12} color={trulyAvailableCount > 0 ? '#fb923c' : '#aaa'} />
+                <span className={cn(trulyAvailableCount > 0 ? 'text-orange-400' : 'text-stone-500')}>
+                  🎫 {trulyAvailableCount > 0 ? `有 ${trulyAvailableCount} 张券可用` : '查看不可用券'}
+                </span>
+                <ChevronRight size={12} />
               </div>
             )
           })()}
 
-          {/* 凑单提示 / 发券提示 (P5-A 修正) */}
+          {/* 凑单提示 / 发券提示 */}
           {couponHint && (
-            <div
-              style={{ fontSize: '11px', color: couponHint.type === '达标' ? '#4ade80' : '#fdba74', textAlign: 'center', paddingTop: '2px', fontWeight: '600' }}
-            >
+            <div className={cn(
+              "text-[11px] text-center pt-0.5 font-bold",
+              couponHint.type === '达标' ? "text-emerald-400" : "text-orange-300"
+            )}>
               {couponHint.type === '达标' ? '✅ ' : '🔥 '}{couponHint.text}
             </div>
           )}
@@ -783,95 +795,69 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             return (
               <div
                 onClick={() => setShowVipInfo(true)}
-                style={{
-                  marginTop: '4px',
-                  padding: '8px 12px',
-                  background: 'linear-gradient(90deg, rgba(251,191,36,0.1), rgba(249,115,22,0.1))',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(249,115,22,0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  cursor: 'pointer',
-                  animation: 'pulse 2s infinite'
-                }}
+                className="mt-1 py-2 px-3 bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-lg border border-orange-500/20 flex items-center justify-center gap-1.5 cursor-pointer animate-pulse"
               >
-                <span style={{ fontSize: '12px' }}>🔥</span>
-                <span style={{ fontSize: '11px', color: '#fb923c', fontWeight: '700' }}>
+                <span className="text-xs">🔥</span>
+                <span className="text-[11px] text-orange-400 font-bold">
                   再加 ¥{nextLevelInfo.needed.toFixed(0)} 可享 {nextLevelInfo.nextLevel.label} {nextLevelInfo.nextLevel.discount}
                 </span>
-                <ChevronRight size={10} color="#fb923c" />
+                <ChevronRight size={10} className="text-orange-400" />
               </div>
             )
           })()}
         </div>
       )}
 
-      {/* 全局动效挂载：右侧悬浮领券按钮 (P4) */}
+      {/* 全局动效挂载：悬浮领券按钮 (已封装支持拖拽和吸附) */}
       {claimableCoupons.length > 0 && (
-        <div
-          onClick={() => setShowCouponCenter(true)}
-          className="pulsing-coupon-btn"
-          style={{
-            position: 'fixed', right: '16px', bottom: activeOrder ? '150px' : totalCount > 0 ? '70px' : '20px',
-            zIndex: 40, width: '48px', height: '48px', borderRadius: '50%',
-            background: 'linear-gradient(135deg, #ffedd5, #ffedd5)',
-            boxShadow: '0 4px 12px rgba(234,88,12,0.3)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', border: '2px solid #ea580c',
-            transition: 'bottom 0.3s ease'
-          }}
-        >
-          <Gift size={20} color="#ea580c" style={{ marginBottom: '-2px' }} />
-          <span style={{ fontSize: '10px', fontWeight: '800', color: '#ea580c' }}>抢券</span>
-          {/* 未读气泡小红点 */}
-          <div style={{ position: 'absolute', top: '-4px', right: '-4px', background: '#ef4444', color: 'white', fontSize: '10px', fontWeight: 'bold', width: '18px', height: '18px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid white' }}>
-            {claimableCoupons.length}
-          </div>
-        </div>
+        <DraggableCouponButton 
+          count={claimableCoupons.length} 
+          onClick={() => setShowCouponCenter(true)} 
+          bottomOffset={activeOrder ? 130 : totalCount > 0 ? 50 : 0}
+        />
       )}
 
       {/* 购物车底栏 */}
       {totalCount > 0 && (
-        <div className="cart-bar animate-slide-up" style={{ display: 'flex', flexDirection: 'column', padding: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '12px 24px' }}>
-          <div
-            className="cart-badge" data-count={totalCount}
-            onClick={() => setShowCart(true)}
-            style={{
-              width: 44, height: 44, borderRadius: '50%', background: 'var(--color-primary)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              marginTop: -20, border: '4px solid #292524', cursor: 'pointer'
-            }}
-          >
-            <ShoppingBag size={22} color="white" />
-          </div>
-          <div style={{ marginLeft: '12px', flex: 1, cursor: 'pointer' }} onClick={() => setShowCart(true)}>
-            <div style={{ fontSize: '18px', fontWeight: '700' }}>
-              {vipLevel.rate < 1 || selectedCoupons.length > 0 ? (
-                <>
-                  <span style={{ color: 'var(--color-primary)' }}>{formatPrice(finalAmount)}</span>
-                  <span style={{ fontSize: '12px', color: '#aaa', textDecoration: 'line-through', marginLeft: '6px' }}>{formatPrice(totalAmount)}</span>
-                </>
-              ) : formatPrice(totalAmount)}
+        <div className="fixed bottom-0 left-0 right-0 bg-white shadow-[0_-8px_30px_rgba(0,0,0,0.08)] animate-in slide-in-from-bottom duration-300 z-50">
+          <div className="flex items-center w-full px-4 py-3 pb-safe max-w-2xl mx-auto">
+            <div
+              className="relative w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center -mt-8 border-[5px] border-slate-50 cursor-pointer shadow-lg z-10 transition-transform active:scale-95"
+              onClick={() => setShowCart(true)}
+            >
+              <ShoppingBag size={22} className="text-white" />
+              <div className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-slate-900">
+                {totalCount}
+              </div>
             </div>
-            <div style={{ fontSize: '11px', color: '#a8a29e' }}>
-              {(vipLevel.rate < 1 || selectedCoupons.length > 0)
-                ? `已省 ¥${(totalAmount - finalAmount).toFixed(1)}`
-                : '另需配送费或自提'}
+            
+            <div className="ml-3 flex-1 cursor-pointer flex flex-col justify-center" onClick={() => setShowCart(true)}>
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-black text-slate-900">
+                  {vipLevel.rate < 1 || selectedCoupons.length > 0 ? (
+                    <>
+                      <span className="text-orange-500 mr-1">{formatPrice(finalAmount)}</span>
+                      <span className="text-[11px] text-slate-400 line-through">{formatPrice(totalAmount)}</span>
+                    </>
+                  ) : formatPrice(totalAmount)}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-500 font-bold tracking-tight">
+                {(vipLevel.rate < 1 || selectedCoupons.length > 0)
+                  ? `已为您节省 ¥${(totalAmount - finalAmount).toFixed(1)}`
+                  : '另需配送费或自提'}
+              </div>
             </div>
-          </div>
-          <button
-            className="btn btn-primary"
-            style={{ borderRadius: '25px', padding: '10px 24px', fontSize: '16px' }}
-            onClick={() => {
-              setShowOrderForm(true)
-              if (phone.length === 11) loadCustomerBenefits(phone)
-            }}
-          >
-            去下单
-          </button>
+            
+            <button
+              className="bg-orange-500 text-white rounded-full px-6 py-2.5 text-sm font-black active:scale-95 transition-all shadow-md shadow-orange-200"
+              onClick={() => {
+                setShowOrderForm(true)
+                if (phone.length === 11) loadCustomerBenefits(phone)
+              }}
+            >
+              去结算
+            </button>
           </div>
         </div>
       )}
@@ -879,73 +865,98 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       {/* 购物车弹窗 */}
       {showCart && (
         <>
-          <div className="overlay" style={{ zIndex: 100 }} onClick={() => setShowCart(false)} />
-          <div className="dialog" style={{ 
-            zIndex: 110, position: 'fixed', bottom: 0, top: 'auto', 
-            left: 0, right: 0, transform: 'none', width: '100%', 
-            maxWidth: 'none', borderRadius: '20px 20px 0 0', padding: '20px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ fontWeight: '800' }}>已购菜品</h3>
-              <button onClick={() => setShowCart(false)} style={{ background: 'none', border: 'none' }}>
-                <X size={20} color="#999" />
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity animate-in fade-in" onClick={() => setShowCart(false)} />
+          <div className="fixed bottom-0 left-0 right-0 max-w-2xl mx-auto bg-slate-50 rounded-t-[2rem] z-50 animate-in slide-in-from-bottom pb-safe shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="px-5 py-4 flex justify-between items-center bg-white rounded-t-[2rem] border-b border-slate-100 shrink-0">
+              <h3 className="font-black text-slate-900 text-lg">已选菜品</h3>
+              <button onClick={() => setShowCart(false)} className="p-2 -mr-2 bg-slate-100 rounded-full text-slate-500 active:scale-90 transition-transform">
+                <X size={18} />
               </button>
             </div>
-            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              {cart.map(item => (
-                <div key={item.menuItem.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingBottom: '16px', borderBottom: '1px solid #f5f5f4', marginBottom: '16px' }}>
-                  <div style={{ width: '50px', height: '50px', borderRadius: '8px', background: item.menuItem.image_url ? `url(${item.menuItem.image_url}) center/cover` : '#f5f5f4' }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: '600', fontSize: '14px' }}>{item.menuItem.name}</div>
-                    <div style={{ color: 'var(--color-primary)', fontWeight: '700', fontSize: '13px', marginTop: '2px' }}>{formatPrice(item.menuItem.price)}</div>
+            
+            <div className="flex-1 overflow-y-auto px-5 py-2 bg-white custom-scrollbar">
+              <div className="flex justify-end pt-2 pb-3">
+                <button onClick={() => setCart([])} className="text-xs font-bold text-slate-400 flex items-center gap-1 active:text-rose-500 transition-colors">
+                  清空购物车
+                </button>
+              </div>
+              <div className="space-y-4">
+                {cart.map(item => (
+                  <div key={item.menuItem.id} className="flex items-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-slate-100 shrink-0 relative overflow-hidden">
+                       {item.menuItem.image_url ? (
+                         <div className="w-full h-full bg-center bg-cover" style={{ backgroundImage: `url(${item.menuItem.image_url})` }} />
+                       ) : (
+                         <div className="w-full h-full flex items-center justify-center text-slate-300">
+                            <span className="text-[8px] uppercase font-bold tracking-widest">No img</span>
+                         </div>
+                       )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-[15px] text-slate-900 truncate">{item.menuItem.name}</div>
+                      <div className="text-orange-500 font-black text-[14px] mt-0.5">
+                        <span className="text-[10px] mr-0.5">¥</span>{item.menuItem.price}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => removeFromCart(item.menuItem.id)} className="size-7 rounded-full border border-slate-200 bg-white flex items-center justify-center text-slate-600 active:scale-90 transition-transform shadow-sm">
+                        <Minus size={14} />
+                      </button>
+                      <span className="text-[14px] font-black w-4 text-center">{item.quantity}</span>
+                      <button onClick={() => addToCart(item.menuItem)} className="size-7 rounded-full bg-orange-500 flex items-center justify-center text-white active:scale-90 transition-transform shadow-md shadow-orange-200">
+                        <Plus size={14} strokeWidth={3} />
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button onClick={() => removeFromCart(item.menuItem.id)} className="btn btn-outline" style={{ width: 24, height: 24, padding: 0 }}>-</button>
-                    <span style={{ width: 20, textAlign: 'center', fontWeight: '600' }}>{item.quantity}</span>
-                    <button onClick={() => addToCart(item.menuItem)} className="btn btn-outline" style={{ width: 24, height: 24, padding: 0 }}>+</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div style={{ textAlign: 'right', marginTop: '10px' }}>
-              <button onClick={() => setCart([])} style={{ fontSize: '12px', color: '#999', background: 'none', border: 'none' }}>清空购物车</button>
+                ))}
+              </div>
             </div>
 
             {/* 折扣 & 优惠券明细 */}
-            <div style={{ marginTop: '12px', padding: '12px', background: '#fafaf9', borderRadius: '10px', borderTop: '1px solid #f0f0f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                <span style={{ color: '#888' }}>商品合计</span>
-                <span style={{ fontWeight: '600' }}>{formatPrice(totalAmount)}</span>
-              </div>
-
-              {vipLevel.rate < 1 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                  <span style={{ color: '#22c55e' }}>⭐ {vipLevel.label} {vipLevel.discount}</span>
-                  <span style={{ color: '#22c55e', fontWeight: '600' }}>-{formatPrice(vipDiscountAmount)}</span>
+            <div className="bg-slate-50 p-5 shrink-0 mb-[72px]">
+              <div className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100/50 space-y-2.5">
+                <div className="flex justify-between items-center text-[13px]">
+                  <span className="text-slate-500 font-medium">商品合计</span>
+                  <span className="font-black text-slate-700">¥{totalAmount.toFixed(2)}</span>
                 </div>
-              )}
 
-              {selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
-                  <span style={{ color: '#f59e0b' }}>🎫 {selectedCoupons.map(c => c.coupon?.title).join(' + ')}</span>
-                  <span style={{ color: '#f59e0b', fontWeight: '600' }}>-{formatPrice(discountResult.couponDiscountAmount)}</span>
+                {vipLevel.rate < 1 && (
+                  <div className="flex justify-between items-center text-[13px]">
+                    <span className="text-emerald-500 font-bold flex items-center gap-1">
+                      <Star size={12} fill="currentColor" /> 
+                      {vipLevel.label} {vipLevel.discount}
+                    </span>
+                    <span className="text-emerald-500 font-black">-¥{vipDiscountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0 && (
+                  <div className="flex justify-between items-center text-[13px]">
+                    <span className="text-amber-500 font-bold flex items-center gap-1">
+                      <Gift size={12} />
+                      {selectedCoupons.map(c => c.coupon?.title).join(' + ')}
+                    </span>
+                    <span className="text-amber-500 font-black">-¥{discountResult.couponDiscountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {/* 可用券提示 */}
+                {availableCoupons.length > 0 && selectedCoupons.length === 0 && (
+                  <div
+                    onClick={() => { setShowCart(false); setShowCouponPicker(true) }}
+                    className="flex justify-between items-center text-[13px] text-rose-500 font-bold cursor-pointer bg-rose-50 p-2 rounded-xl active:scale-[0.98] transition-transform"
+                  >
+                    <span className="flex items-center gap-1"><Gift size={12} /> 有 {availableCoupons.length} 张优惠券可用</span>
+                    <ChevronRight size={14} />
+                  </div>
+                )}
+
+                <div className="flex justify-between items-end pt-3 mt-1 border-t border-dashed border-slate-200">
+                  <span className="font-black text-slate-800 text-sm">应付合计</span>
+                  <span className="text-orange-500 font-black text-xl leading-none">
+                    <span className="text-sm mr-0.5">¥</span>{finalAmount.toFixed(2)}
+                  </span>
                 </div>
-              )}
-
-              {/* 可用券提示 */}
-              {availableCoupons.length > 0 && selectedCoupons.length === 0 && (
-                <div
-                  onClick={() => { setShowCart(false); setShowCouponPicker(true) }}
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', marginBottom: '6px', cursor: 'pointer', color: '#ef4444' }}
-                >
-                  <span>🎫 有 {availableCoupons.length} 张优惠券可用</span>
-                  <ChevronRight size={14} />
-                </div>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '16px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #e5e5e5' }}>
-                <span>合计</span>
-                <span style={{ color: 'var(--color-primary)' }}>{formatPrice(finalAmount)}</span>
               </div>
             </div>
           </div>
@@ -955,67 +966,63 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       {/* 下单表单弹窗 */}
       {showOrderForm && (
         <>
-          <div className="overlay" style={{ zIndex: 120 }} onClick={() => setShowOrderForm(false)} />
-          <div className="dialog" style={{ 
-            zIndex: 130, position: 'fixed', inset: 0, width: '100%', 
-            maxWidth: 'none', transform: 'none', borderRadius: 0, 
-            height: '100vh', padding: '0', display: 'flex', flexDirection: 'column'
-          }}>
-            <header style={{ padding: '14px 16px', borderBottom: '1px solid #f5f5f4', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button onClick={() => setShowOrderForm(false)} style={{ background: 'none', border: 'none' }}><X size={24} /></button>
-              <h3 style={{ fontWeight: '800', fontSize: '18px' }}>确认订单</h3>
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity animate-in fade-in" onClick={() => setShowOrderForm(false)} />
+          <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col animate-in slide-in-from-bottom duration-300">
+            <header className="bg-white/80 backdrop-blur-md px-5 py-3 flex items-center justify-between border-b border-slate-100 shrink-0 sticky top-0 z-10">
+              <h3 className="font-black text-slate-900 text-lg">确认订单</h3>
+              <button onClick={() => setShowOrderForm(false)} className="p-2 -mr-2 bg-slate-100 rounded-full text-slate-500 active:scale-90 transition-transform">
+                <X size={20} />
+              </button>
             </header>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: '20px', background: '#f8f9fa' }}>
+            <div className="flex-1 overflow-y-auto px-4 py-5 custom-scrollbar pb-32">
               {/* 类型选择 */}
-              <div style={{ 
-                display: 'flex', background: 'white', padding: '4px', 
-                borderRadius: '12px', marginBottom: '20px', border: '1px solid #eee'
-              }}>
+              <div className="flex bg-white p-1 rounded-2xl mb-5 shadow-sm border border-slate-100">
                 <button 
                   onClick={() => setOrderType('personal')}
-                  style={{ 
-                    flex: 1, padding: '10px', borderRadius: '8px', border: 'none', 
-                    background: orderType === 'personal' ? 'var(--color-primary)' : 'none',
-                    color: orderType === 'personal' ? 'white' : '#666',
-                    fontWeight: '700', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-                  }}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-all",
+                    orderType === 'personal' ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:bg-slate-50 active:bg-slate-100"
+                  )}
                 >
                   <UserRound size={16} /> 个人
                 </button>
                 <button 
                   onClick={() => setOrderType('company')}
-                  style={{ 
-                    flex: 1, padding: '10px', borderRadius: '8px', border: 'none', 
-                    background: orderType === 'company' ? 'var(--color-primary)' : 'none',
-                    color: orderType === 'company' ? 'white' : '#666',
-                    fontWeight: '700', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-                  }}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-all",
+                    orderType === 'company' ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:bg-slate-50 active:bg-slate-100"
+                  )}
                 >
                   <Briefcase size={16} /> 公司
                 </button>
               </div>
 
               {/* 信息表单 */}
-              <div className="card" style={{ marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-5 space-y-4">
                 <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
-                    <User size={14} /> 您的称呼
+                  <label className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
+                    <User size={14} className="text-orange-500" /> 您的称呼
                   </label>
                   <input 
-                    className={`input ${formError && !customerName ? 'shake' : ''}`} 
+                    className={cn(
+                      "w-full bg-slate-50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all",
+                      formError && !customerName && "border-rose-500 bg-rose-50 placeholder:text-rose-300 animate-shake"
+                    )}
                     placeholder="怎么称呼您？" 
                     value={customerName} 
                     onChange={e => setCustomerName(e.target.value)} 
-                    style={{ border: formError && !customerName ? '1.5px solid #ef4444' : undefined, background: formError && !customerName ? '#fef2f2' : undefined }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
-                    <Phone size={14} /> 联系手机
+                  <label className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
+                    <Phone size={14} className="text-orange-500" /> 联系手机
                   </label>
                   <input 
-                    className={`input ${(formError && !phone) || (phone.length > 0 && !isValidPhone(phone)) ? 'shake' : ''}`} 
+                    className={cn(
+                      "w-full bg-slate-50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all",
+                      (formError && !phone) || (phone.length > 0 && !isValidPhone(phone)) ? "border-rose-500 bg-rose-50 animate-shake" : ""
+                    )}
                     type="tel" 
                     placeholder="重要：配送员将联系此号码" 
                     value={phone} 
@@ -1025,115 +1032,114 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                       if (v.length === 11) loadCustomerBenefits(v)
                     }} 
                     maxLength={11} 
-                    style={{ border: (formError && !phone) || (phone.length > 0 && !isValidPhone(phone)) ? '1.5px solid #ef4444' : undefined, background: formError && !phone ? '#fef2f2' : undefined }}
                   />
                   {phone.length > 0 && !isValidPhone(phone) && (
-                    <p style={{ fontSize: '12px', color: '#ef4444', marginTop: '4px' }}>请输入有效的手机号（1开头，11位数字）</p>
+                    <p className="text-[11px] font-bold text-rose-500 mt-1.5 ml-1">请输入有效的手机号（1开头，11位数字）</p>
                   )}
                 </div>
                 <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
-                    <Clock size={14} /> 预定时间
+                  <label className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
+                    <Clock size={14} className="text-orange-500" /> 预定时间
                   </label>
                   <input 
-                    className={`input ${formError && !scheduledTime ? 'shake' : ''}`} 
+                    className={cn(
+                      "w-full bg-slate-50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all",
+                      formError && !scheduledTime && "border-rose-500 bg-rose-50 animate-shake"
+                    )}
                     type="datetime-local" 
                     value={scheduledTime} 
                     onChange={e => setScheduledTime(e.target.value)} 
-                    style={{ border: formError && !scheduledTime ? '1.5px solid #ef4444' : undefined, background: formError && !scheduledTime ? '#fef2f2' : undefined }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: '700', marginBottom: '8px', color: '#444' }}>
-                    <MapPin size={14} /> 详细地址
+                  <label className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
+                    <MapPin size={14} className="text-orange-500" /> 详细地址
                   </label>
                   <textarea 
-                    className={`input ${formError && !address ? 'shake' : ''}`} 
+                    className={cn(
+                      "w-full bg-slate-50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all resize-none",
+                      formError && !address && "border-rose-500 bg-rose-50 placeholder:text-rose-300 animate-shake"
+                    )}
                     placeholder="请输入您的详细配送地址..." 
                     rows={2} 
                     value={address} 
                     onChange={e => setAddress(e.target.value)} 
-                    style={{ border: formError && !address ? '1.5px solid #ef4444' : undefined, background: formError && !address ? '#fef2f2' : undefined }}
                   />
                 </div>
               </div>
 
               {/* VIP 等级权益入口 */}
               <div
-                className="card"
                 onClick={() => setShowVipInfo(true)}
-                style={{ marginBottom: '20px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px' }}
+                className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100 mb-5 cursor-pointer flex items-center justify-between active:scale-[0.98] transition-transform"
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{
-                    width: '36px', height: '36px', borderRadius: '10px',
-                    background: `linear-gradient(135deg, ${vipLevel.color}, ${vipLevel.color}88)`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center'
-                  }}>
-                    <Star size={18} color="white" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner" style={{ background: `linear-gradient(135deg, ${vipLevel.color}, ${vipLevel.color}dd)` }}>
+                    <Star size={20} className="text-white" />
                   </div>
                   <div>
-                    <div style={{ fontSize: '14px', fontWeight: '700', color: vipLevel.color }}>
+                    <div className="text-sm font-black flex items-center gap-1.5" style={{ color: vipLevel.color }}>
                       {vipLevel.label} · {vipLevel.description}
-                      {vipLevel.rate < 1 && <span style={{ fontSize: '12px', marginLeft: '6px' }}>{vipLevel.discount}</span>}
+                      {vipLevel.rate < 1 && <span className="bg-white/80 px-1.5 py-0.5 rounded text-[10px] shadow-sm">{vipLevel.discount}</span>}
                     </div>
-                    <div style={{ fontSize: '11px', color: '#aaa', marginTop: '2px' }}>
+                    <div className="text-[11px] text-slate-400 font-bold mt-0.5">
                       {customerPoints + Math.floor(totalAmount)} 积分（含本单）
                       {vipLevel.maxPoints !== -1 && (customerPoints + Math.floor(totalAmount)) < vipLevel.maxPoints + 1
                         && ` · 再积 ${vipLevel.maxPoints + 1 - customerPoints - Math.floor(totalAmount)} 分升下一级`}
                     </div>
                   </div>
                 </div>
-                <ChevronRight size={16} color="#ccc" />
+                <ChevronRight size={18} className="text-slate-300" />
               </div>
 
               {/* 订单预览 */}
-              <div className="card">
-                <h4 style={{ fontSize: '14px', fontWeight: '800', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid #f5f5f4' }}>菜品详情</h4>
-                {cart.map(item => (
-                  <div key={item.menuItem.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
-                    <span style={{ color: '#444' }}>{item.menuItem.name} x{item.quantity}</span>
-                    <span style={{ fontWeight: '600' }}>{formatPrice(item.menuItem.price * item.quantity)}</span>
-                  </div>
-                ))}
+              <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-4">
+                <h4 className="text-sm font-black text-slate-900 border-b border-slate-100 pb-3 mb-4">菜品详情</h4>
+                <div className="space-y-3 mb-4">
+                  {cart.map(item => (
+                    <div key={item.menuItem.id} className="flex justify-between items-center text-sm">
+                      <span className="text-slate-700 font-bold">{item.menuItem.name} <span className="text-slate-400 font-medium ml-1">x{item.quantity}</span></span>
+                      <span className="font-black text-slate-900">¥{formatPrice(item.menuItem.price * item.quantity).replace('¥', '')}</span>
+                    </div>
+                  ))}
+                </div>
 
                 {/* 折扣明细 */}
-                {discountResult.vipDiscountAmount > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#22c55e', marginTop: '8px' }}>
-                    <span>🌟 {vipLevel.label} {vipLevel.discount} 优惠</span>
-                    <span>-{formatPrice(discountResult.vipDiscountAmount)}</span>
+                <div className="space-y-2 mt-4 bg-slate-50 rounded-2xl p-3 border border-slate-100/50">
+                  {discountResult.vipDiscountAmount > 0 && (
+                    <div className="flex justify-between text-[13px]">
+                      <span className="text-emerald-600 font-bold flex items-center gap-1"><Star size={12} fill="currentColor"/> {vipLevel.label} {vipLevel.discount}</span>
+                      <span className="text-emerald-600 font-black">-¥{formatPrice(discountResult.vipDiscountAmount).replace('¥', '')}</span>
+                    </div>
+                  )}
+                  {discountResult.couponDiscountAmount > 0 && (
+                    <div className="flex justify-between text-[13px]">
+                      <span className="text-amber-500 font-bold flex items-center gap-1"><Gift size={12} /> 优惠券扣减</span>
+                      <span className="text-amber-500 font-black">-¥{formatPrice(discountResult.couponDiscountAmount).replace('¥', '')}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-end pt-3 mt-1 border-t border-dashed border-slate-200">
+                    <span className="font-black text-slate-800 text-sm">应付合计</span>
+                    <span className="text-orange-500 font-black text-xl leading-none">
+                      <span className="text-sm mr-0.5">¥</span>{finalAmount.toFixed(2)}
+                    </span>
                   </div>
-                )}
-                {discountResult.couponDiscountAmount > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#f59e0b', marginTop: '4px' }}>
-                    <span>🎫 优惠券扣减</span>
-                    <span>-{formatPrice(discountResult.couponDiscountAmount)}</span>
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '18px', marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #ddd' }}>
-                  <span>应付合计</span>
-                  <span style={{ color: 'var(--color-primary)' }}>{formatPrice(finalAmount)}</span>
                 </div>
 
                 {/* 结算页升级提醒（临单提醒） */}
                 {(() => {
                   const currentTotalPts = customerPoints + Math.floor(totalAmount);
                   const nextLevelInfo = getPointsToNextLevel(currentTotalPts);
-                  if (nextLevelInfo && nextLevelInfo.needed <= 50) { // 差额小于 50 元时强烈提醒
+                  if (nextLevelInfo && nextLevelInfo.needed <= 50) { 
                     return (
                       <div 
                         onClick={() => setShowOrderForm(false)}
-                        style={{ 
-                          marginTop: '12px', padding: '10px', background: '#fff7ed', 
-                          border: '1px dashed #f97316', borderRadius: '8px', textAlign: 'center',
-                          cursor: 'pointer'
-                        }}
+                        className="mt-4 p-3 bg-gradient-to-r from-orange-50 to-orange-100/50 border border-orange-200 border-dashed rounded-2xl text-center cursor-pointer active:scale-95 transition-transform"
                       >
-                        <span style={{ fontSize: '13px', color: '#c2410c', fontWeight: '700' }}>
-                          🎁 仅差 ¥{nextLevelInfo.needed.toFixed(0)} 即可升级为 {nextLevelInfo.nextLevel.label}！
-                        </span>
-                        <div style={{ fontSize: '11px', color: '#ea580c', marginTop: '2px' }}>点击返回凑单，本单立享 {nextLevelInfo.nextLevel.discount}</div>
+                        <div className="text-[13px] text-orange-700 font-black flex items-center justify-center gap-1">
+                          <Gift size={14} /> 仅差 ¥{nextLevelInfo.needed.toFixed(0)} 升级 {nextLevelInfo.nextLevel.label}！
+                        </div>
+                        <div className="text-[11px] text-orange-600/80 font-bold mt-1">返回凑单，本单立享 {nextLevelInfo.nextLevel.discount}</div>
                       </div>
                     )
                   }
@@ -1144,37 +1150,44 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
               {/* 优惠券选择入口 */}
               {availableCoupons.length > 0 && (
                 <div
-                  className="card"
-                  style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                  className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100 mb-5 flex items-center justify-between cursor-pointer active:scale-[0.98] transition-transform"
                   onClick={() => setShowCouponPicker(true)}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}>
-                    <Gift size={16} color="#f59e0b" />
-                    <span style={{ fontWeight: '600' }}>优惠券</span>
-                    {selectedCoupons.length > 0
-                      ? <span style={{ color: '#f59e0b', fontWeight: '700' }}>-￥{selectedCoupons.reduce((s, c) => s + (c.coupon?.amount ?? 0), 0).toFixed(2)} ({selectedCoupons.length}张)</span>
-                      : <span style={{ color: '#aaa', fontSize: '13px' }}>有 {availableCoupons.length} 张可用</span>}
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 bg-amber-50 rounded-xl">
+                      <Gift size={18} className="text-amber-500" />
+                    </div>
+                    <span className="font-black text-slate-800 text-sm">优惠券</span>
+                    {selectedCoupons.length > 0 ? (
+                      <span className="bg-rose-50 text-rose-600 font-black text-[11px] px-2 py-0.5 rounded-lg border border-rose-100 ml-1">
+                        -¥{selectedCoupons.reduce((s, c) => s + (c.coupon?.amount ?? 0), 0).toFixed(2)} ({selectedCoupons.length}张)
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 font-bold text-xs ml-1">有 {availableCoupons.length} 张可用</span>
+                    )}
                   </div>
-                  <ChevronRight size={16} color="#bbb" />
+                  <ChevronRight size={18} className="text-slate-300" />
                 </div>
               )}
 
-              <div style={{ 
-                marginTop: '16px', padding: '12px', background: '#fef2f2', 
-                borderRadius: '8px', color: '#dc2626', fontSize: '12px' 
-              }}>
-                <strong>取消规则：</strong> 商家接单后 3 分钟内可极速免责取消。超出 3 分钟后将根据制作时长收取 5%-80% 的食材损耗费。
+              <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100/50">
+                <div className="flex items-start gap-2 text-rose-500">
+                  <Clock size={16} className="shrink-0 mt-0.5" />
+                  <p className="text-[11px] font-bold leading-relaxed">
+                    <span className="font-black mr-1 text-rose-600">取消规则:</span> 
+                    商家接单后 3 分钟内可极速免责取消。超出 3 分钟后将根据制作时长收取 5%-80% 的食材损耗费。
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div style={{ padding: '16px', background: 'white', borderTop: '1px solid #f5f5f4' }}>
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-4 pb-safe z-20">
               <button 
-                className="btn btn-primary btn-block" 
-                style={{ height: '50px', fontSize: '18px', borderRadius: '25px' }}
+                className="w-full bg-slate-900 text-white rounded-full h-[52px] text-[15px] font-black flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 disabled:scale-100 shadow-xl shadow-slate-200"
                 onClick={handleSubmitOrder}
                 disabled={submitting}
               >
-                {submitting ? <span className="spinner" /> : <>确认并模拟支付 <ArrowRight size={18} /></>}
+                {submitting ? <span className="spinner border-white border-t-transparent" /> : <>确认并模拟支付 <ArrowRight size={18} /></>}
               </button>
             </div>
           </div>
@@ -1213,49 +1226,56 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       {/* VIP 等级详情幕 */}
       {showVipInfo && (
         <>
-          <div className="overlay" style={{ zIndex: 200 }} onClick={() => setShowVipInfo(false)} />
-          <div className="dialog" style={{ zIndex: 210, maxHeight: '80vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontWeight: '800', fontSize: '18px' }}>会员等级优惠</h3>
-              <button onClick={() => setShowVipInfo(false)} style={{ background: 'none', border: 'none' }}><X size={20} /></button>
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity animate-in fade-in" onClick={() => setShowVipInfo(false)} />
+          <div className="fixed bottom-0 left-0 right-0 max-w-2xl mx-auto bg-slate-50 rounded-t-[2rem] z-50 animate-in slide-in-from-bottom pb-safe shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="px-5 py-4 flex justify-between items-center bg-white rounded-t-[2rem] border-b border-slate-100 shrink-0">
+              <h3 className="font-black text-slate-900 text-lg">会员等级优惠</h3>
+              <button onClick={() => setShowVipInfo(false)} className="p-2 -mr-2 bg-slate-100 rounded-full text-slate-500 active:scale-90 transition-transform">
+                <X size={18} />
+              </button>
             </div>
-            <div style={{ fontSize: '13px', color: '#666', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              当前积分：<span style={{ fontWeight: '700', color: '#1c1917' }}>⭐ {customerPoints} </span>
-              {totalAmount > 0 && <span style={{ color: '#f97316', fontSize: '12px' }}>(+{Math.floor(finalAmount)} 预得)</span>}
-            </div>
-            {VIP_LEVELS.slice(1).map(lv => {
-              const potentialPoints = customerPoints + Math.floor(totalAmount)
-              const targetLevel = getVipLevel(potentialPoints)
-              const isTargetLevel = targetLevel.level === lv.level
-              const isPastLevel = targetLevel.level > lv.level
-              return (
-                <div key={lv.level} style={{
-                  display: 'flex', alignItems: 'center', gap: '12px',
-                  padding: '12px', borderRadius: '12px', marginBottom: '8px',
-                  background: isTargetLevel ? '#fff7ed' : '#f9fafb',
-                  border: isTargetLevel ? '2px solid #f97316' : '1px solid #f0f0f0',
-                  opacity: isPastLevel || isTargetLevel ? 1 : 0.6
-                }}>
-                  <div style={{
-                    width: '40px', height: '40px', borderRadius: '50%',
-                    background: lv.color, display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', flexShrink: 0,
-                  }}>
-                    <Star size={18} color="white" fill="white" />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: '700', fontSize: '15px' }}>{lv.label} · {lv.description}</div>
-                    <div style={{ fontSize: '12px', color: '#aaa', marginTop: '2px' }}>
-                      {lv.maxPoints === -1 ? `积分 ${lv.minPoints}+` : `积分 ${lv.minPoints}~${lv.maxPoints}`}
+            
+            <div className="flex-1 overflow-y-auto px-5 py-5 custom-scrollbar">
+              <div className="text-[13px] text-slate-500 font-bold mb-4 flex items-center gap-1.5">
+                当前积分：<span className="font-black text-slate-900 flex items-center gap-0.5"><Star size={12} fill="#f59e0b" className="text-amber-500" /> {customerPoints} </span>
+                {totalAmount > 0 && <span className="text-orange-500 text-[11px]">(+{Math.floor(finalAmount)} 预得)</span>}
+              </div>
+
+              <div className="space-y-3">
+                {VIP_LEVELS.slice(1).map(lv => {
+                  const potentialPoints = customerPoints + Math.floor(totalAmount)
+                  const targetLevel = getVipLevel(potentialPoints)
+                  const isTargetLevel = targetLevel.level === lv.level
+                  const isPastLevel = targetLevel.level > lv.level
+                  
+                  return (
+                    <div key={lv.level} className={cn(
+                      "flex items-center gap-3 p-4 rounded-3xl border transition-all",
+                      isTargetLevel ? "bg-orange-50/50 border-orange-200 shadow-sm" : "bg-white border-slate-100",
+                      !(isPastLevel || isTargetLevel) && "opacity-60"
+                    )}>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner" style={{ background: `linear-gradient(135deg, ${lv.color}, ${lv.color}dd)` }}>
+                        <Star size={20} className="text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-black text-slate-900 text-[15px] truncate">{lv.label} · {lv.description}</div>
+                        <div className="text-[11px] text-slate-400 font-bold mt-0.5">
+                          {lv.maxPoints === -1 ? `积分 ${lv.minPoints}+` : `积分 ${lv.minPoints}~${lv.maxPoints}`}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <div className="font-black text-lg" style={{ color: lv.color }}>{lv.discount}</div>
+                        {isTargetLevel && (
+                          <div className="text-[10px] text-orange-500 font-black mt-0.5 bg-orange-100 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                            {potentialPoints >= lv.minPoints ? '本单达成' : '升级中'}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ fontWeight: '800', fontSize: '18px', color: lv.color }}>{lv.discount}</div>
-                  {isTargetLevel && (
-                    <div style={{ fontSize: '11px', color: '#f97316', fontWeight: '700' }}>{potentialPoints >= lv.minPoints ? '本单达成' : '升级中'}</div>
-                  )}
-                </div>
-              )
-            })}
+                  )
+                })}
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -1263,66 +1283,69 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       {/* 领券中心及我的券弹窗 (P5-C) */}
       {showCouponCenter && (
         <>
-          <div className="overlay" style={{ zIndex: 200 }} onClick={() => setShowCouponCenter(false)} />
-          <div className="dialog" style={{ zIndex: 210, position: 'fixed', bottom: 0, top: 'auto', left: 0, right: 0, transform: 'none', width: '100%', maxWidth: 'none', borderRadius: '20px 20px 0 0', padding: '20px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
-              <h3 style={{ fontWeight: '800' }}>领券中心</h3>
-              <button onClick={() => setShowCouponCenter(false)} style={{ background: 'none', border: 'none' }}><X size={20} /></button>
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity animate-in fade-in" onClick={() => setShowCouponCenter(false)} />
+          <div className="fixed bottom-0 left-0 right-0 max-w-2xl mx-auto bg-slate-50 rounded-t-[2rem] z-50 animate-in slide-in-from-bottom pb-safe shadow-2xl flex flex-col h-[85vh]">
+            <div className="px-5 py-4 flex justify-between items-center bg-white rounded-t-[2rem] shrink-0">
+              <h3 className="font-black text-slate-900 text-lg flex items-center gap-2"><Gift className="text-orange-500" size={20} />领券中心</h3>
+              <button onClick={() => setShowCouponCenter(false)} className="p-2 -mr-2 bg-slate-100 rounded-full text-slate-500 active:scale-90 transition-transform">
+                <X size={18} />
+              </button>
             </div>
             
             {/* 顶部 4 Tab */}
-            <div style={{ display: 'flex', gap: '20px', borderBottom: '1px solid #f5f5f4', marginBottom: '16px', flexShrink: 0 }}>
+            <div className="flex px-5 bg-white border-b border-slate-100 shrink-0 mb-3 sticky top-0 z-10">
               {(['claim', 'unused', 'used', 'invalid'] as const).map(tab => (
                 <div 
                   key={tab}
                   onClick={() => setCouponCenterTab(tab)}
-                  style={{ 
-                    padding: '8px 0', fontSize: '13px', fontWeight: couponCenterTab === tab ? '700' : '400',
-                    color: couponCenterTab === tab ? '#ea580c' : '#78716c', cursor: 'pointer',
-                    borderBottom: couponCenterTab === tab ? '2px solid #ea580c' : '2px solid transparent'
-                  }}
+                  className={cn(
+                    "flex-1 text-center py-3 text-[13px] font-bold cursor-pointer transition-all border-b-2",
+                    couponCenterTab === tab ? "text-orange-500 border-orange-500" : "text-slate-400 border-transparent hover:text-slate-600"
+                  )}
                 >
                   {tab === 'claim' ? '待领取' : tab === 'unused' ? '未使用' : tab === 'used' ? '已使用' : '已失效'}
                 </div>
               ))}
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto' }}>
+            <div className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
               {couponCenterTab === 'claim' && (
                 centerCoupons.length === 0 ? (
-                  <p style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '40px 0' }}>暂无可领取的优惠券</p>
+                  <div className="py-20 flex flex-col items-center justify-center text-slate-400">
+                    <Gift size={48} className="opacity-20 mb-3" />
+                    <p className="text-[13px] font-bold">暂无可领取的优惠券</p>
+                  </div>
                 ) : (
                   centerCoupons.map(c => {
                     const isClaimed = allMyCoupons.some((uc: UserCoupon) => uc.coupon_id === c.id)
                     const isSoldOut = c.total_quantity !== null && c.claimed_count >= c.total_quantity
                     return (
-                      <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff7ed', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: '1px solid #ffedd5' }}>
-                        <div>
-                          <div style={{ fontWeight: '700', fontSize: '16px', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div key={c.id} className="relative bg-white rounded-3xl p-4 mb-3 shadow-sm border border-orange-100 overflow-hidden flex justify-between items-center">
+                        <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-orange-500" />
+                        <div className="pl-3">
+                          <div className="font-black text-base text-slate-900 flex items-center gap-2">
                             {c.title}
-                            {c.stackable && <span style={{ fontSize: '10px', background: '#ede9fe', color: '#7c3aed', padding: '2px 4px', borderRadius: '4px' }}>可叠加</span>}
+                            {c.stackable && <span className="bg-purple-50 text-purple-600 text-[9px] px-1.5 py-0.5 rounded-md border border-purple-100">可叠加</span>}
                           </div>
-                          <div style={{ fontSize: '13px', color: '#f97316', marginTop: '4px' }}>
+                          <div className="text-[13px] text-orange-600 font-bold mt-1">
                             {c.min_spend > 0 ? `满 ¥${c.min_spend} 减 ¥${c.amount}` : `无门槛减 ¥${c.amount}`}
                           </div>
-                          <div style={{ fontSize: '11px', color: '#f97316', opacity: 0.8, marginTop: '4px' }}>
+                          <div className="text-[10px] text-slate-400 font-medium mt-1.5">
                             有效期 {c.expiry_days} 天
-                            {c.total_quantity !== null && ` · 总量 ${c.total_quantity} 张 · 剩余 ${c.total_quantity - (c.claimed_count || 0)} 张`}
+                            {c.total_quantity !== null && ` · 剩 ${c.total_quantity - (c.claimed_count || 0)} 张`}
                           </div>
                         </div>
                         <button
                           onClick={() => handleClaimCoupon(c)}
                           disabled={isClaimed || isSoldOut || claimLoading === c.id}
-                          style={{
-                            padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: '700', border: 'none',
-                            background: isClaimed ? '#fdba74' : isSoldOut ? '#e5e5e5' : '#ea580c',
-                            color: isClaimed || isSoldOut ? 'white' : 'white',
-                            cursor: isClaimed || isSoldOut ? 'not-allowed' : 'pointer',
-                            transform: claimLoading === c.id ? 'scale(0.95)' : 'none',
-                            transition: 'transform 0.15s ease'
-                          }}
+                          className={cn(
+                            "px-4 py-2 rounded-full text-xs font-black transition-all",
+                            isClaimed ? "bg-slate-100 text-slate-400" : 
+                            isSoldOut ? "bg-slate-100 text-slate-400" : 
+                            "bg-orange-500 text-white shadow-md shadow-orange-200 active:scale-95"
+                          )}
                         >
-                          {claimLoading === c.id ? '...' : isClaimed ? '已领取' : isSoldOut ? '已抢光' : '抢券'}
+                          {claimLoading === c.id ? <div className="spinner size-3 border-2" /> : isClaimed ? '已领取' : isSoldOut ? '已抢光' : '抢券'}
                         </button>
                       </div>
                     )
@@ -1332,30 +1355,31 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
               {couponCenterTab === 'unused' && (
                 availableCoupons.length === 0 ? (
-                  <p style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '40px 0' }}>暂无可用优惠券</p>
+                  <div className="py-20 flex flex-col items-center justify-center text-slate-400">
+                    <Gift size={48} className="opacity-20 mb-3" />
+                    <p className="text-[13px] font-bold">暂无可用优惠券</p>
+                  </div>
                 ) : (
                   availableCoupons.map(uc => {
                     const c = uc.coupon!
                     return (
-                      <div key={uc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff7ed', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: '1px solid #ffedd5' }}>
-                        <div>
-                          <div style={{ fontWeight: '700', fontSize: '16px', color: '#ea580c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div key={uc.id} className="relative bg-white rounded-3xl p-4 mb-3 shadow-sm border border-orange-100 overflow-hidden flex justify-between items-center">
+                        <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-orange-500" />
+                        <div className="pl-3">
+                          <div className="font-black text-base text-slate-900 flex items-center gap-2">
                             {c.title}
-                            {c.stackable && <span style={{ fontSize: '10px', background: '#ede9fe', color: '#7c3aed', padding: '2px 4px', borderRadius: '4px' }}>可叠加</span>}
+                            {c.stackable && <span className="bg-purple-50 text-purple-600 text-[9px] px-1.5 py-0.5 rounded-md border border-purple-100">可叠加</span>}
                           </div>
-                          <div style={{ fontSize: '13px', color: '#f97316', marginTop: '4px' }}>
+                          <div className="text-[13px] text-orange-600 font-bold mt-1">
                             {c.min_spend > 0 ? `满 ¥${c.min_spend} 减 ¥${c.amount}` : `无门槛减 ¥${c.amount}`}
                           </div>
-                          <div style={{ fontSize: '11px', color: '#f97316', opacity: 0.8, marginTop: '4px' }}>
+                          <div className="text-[10px] text-slate-400 font-medium mt-1.5">
                             {new Date(uc.expires_at).toLocaleDateString()} 到期
                           </div>
                         </div>
                         <button
                           onClick={() => setShowCouponCenter(false)}
-                          style={{
-                            padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: '700', border: '1px solid #ea580c',
-                            background: 'white', color: '#ea580c', cursor: 'pointer'
-                          }}
+                          className="px-4 py-2 rounded-full text-xs font-black transition-all bg-white border border-orange-500 text-orange-500 active:bg-orange-50 active:scale-95"
                         >
                           去使用
                         </button>
@@ -1367,20 +1391,16 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
               {couponCenterTab === 'used' && (() => {
                 const usedCoupons = allMyCoupons.filter((uc: UserCoupon) => uc.status === 'used')
-                if (usedCoupons.length === 0) return <p style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '40px 0' }}>暂无已使用记录</p>
+                if (usedCoupons.length === 0) return <div className="py-20 text-center text-slate-400 text-[13px] font-bold">暂无已使用记录</div>
                 return usedCoupons.map((uc: UserCoupon) => {
                   const c = uc.coupon!
                   return (
-                    <div key={uc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f5f5f4', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: '1px solid #e7e5e4', opacity: 0.8 }}>
-                      <div>
-                        <div style={{ fontWeight: '700', fontSize: '16px', color: '#57534e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {c.title}
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#78716c', marginTop: '4px' }}>
-                          面值 ¥{c.amount}
-                        </div>
+                    <div key={uc.id} className="relative bg-slate-50/50 rounded-3xl p-4 mb-3 border border-slate-100 overflow-hidden flex justify-between items-center opacity-70">
+                      <div className="pl-2">
+                        <div className="font-black text-base text-slate-500">{c.title}</div>
+                        <div className="text-[13px] text-slate-400 font-bold mt-1">面值 ¥{c.amount}</div>
                       </div>
-                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#999' }}>已使用</div>
+                      <div className="text-[13px] font-black text-slate-400 mr-2">已使用</div>
                     </div>
                   )
                 })
@@ -1388,20 +1408,16 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
               {couponCenterTab === 'invalid' && (() => {
                 const invalidCoupons = allMyCoupons.filter((uc: UserCoupon) => uc.status !== 'used' && (new Date(uc.expires_at) <= new Date() || uc.coupon?.status !== 'active'))
-                if (invalidCoupons.length === 0) return <p style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '40px 0' }}>暂无失效记录</p>
+                if (invalidCoupons.length === 0) return <div className="py-20 text-center text-slate-400 text-[13px] font-bold">暂无失效记录</div>
                 return invalidCoupons.map((uc: UserCoupon) => {
                   const c = uc.coupon!
                   return (
-                    <div key={uc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f5f5f4', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: '1px solid #e7e5e4', opacity: 0.8 }}>
-                      <div>
-                        <div style={{ fontWeight: '700', fontSize: '16px', color: '#57534e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {c.title}
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#78716c', marginTop: '4px' }}>
-                          已过期 / 商家已停用
-                        </div>
+                    <div key={uc.id} className="relative bg-slate-50/50 rounded-3xl p-4 mb-3 border border-slate-100 overflow-hidden flex justify-between items-center opacity-70">
+                      <div className="pl-2">
+                        <div className="font-black text-base text-slate-500">{c.title}</div>
+                        <div className="text-[13px] text-slate-400 font-bold mt-1">已过期 / 商家已停用</div>
                       </div>
-                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#999' }}>已失效</div>
+                      <div className="text-[13px] font-black text-slate-400 mr-2">已失效</div>
                     </div>
                   )
                 })
@@ -1549,34 +1565,20 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       {activeOrder && (
         <div
           onClick={() => router.push(`/m/${merchantId}/order/${activeOrder.id}`)}
-          style={{
-            position: 'fixed', right: '16px', bottom: '88px', zIndex: 50,
-            background: 'white', borderRadius: '20px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-            padding: '10px 16px',
-            display: 'flex', alignItems: 'center', gap: '10px',
-            cursor: 'pointer',
-            border: '1.5px solid var(--color-primary)',
-            maxWidth: '220px',
-            animation: 'fadeIn 0.3s ease',
-          }}
+          className="fixed right-4 bottom-20 z-50 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.15)] px-4 py-2.5 flex items-center gap-2.5 cursor-pointer border-[1.5px] border-orange-500 max-w-[220px] animate-in fade-in duration-300"
         >
-          <div style={{
-            width: '32px', height: '32px', borderRadius: '50%',
-            background: '#fff7ed',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            {activeOrder.status === 'pending' && <Clock size={16} color="#f97316" />}
-            {activeOrder.status === 'preparing' && <Package size={16} color="#3b82f6" />}
-            {activeOrder.status === 'delivering' && <ArrowRight size={16} color="#22c55e" />}
+          <div className="size-8 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
+            {activeOrder.status === 'pending' && <Clock size={16} className="text-orange-500" />}
+            {activeOrder.status === 'preparing' && <Package size={16} className="text-blue-500" />}
+            {activeOrder.status === 'delivering' && <ArrowRight size={16} className="text-emerald-500" />}
           </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>我的订单</div>
-            <div style={{ fontSize: '13px', fontWeight: '700', color:
-              activeOrder.status === 'pending' ? '#f97316' :
-              activeOrder.status === 'preparing' ? '#3b82f6' : '#22c55e'
-            }}>
+          <div className="min-w-0">
+            <div className="text-[11px] text-slate-400 font-bold">我的订单</div>
+            <div className={cn(
+              "text-[13px] font-bold truncate",
+              activeOrder.status === 'pending' ? 'text-orange-500' :
+              activeOrder.status === 'preparing' ? 'text-blue-500' : 'text-emerald-500'
+            )}>
               {activeOrder.status === 'pending' && '等待商家接单...'}
               {activeOrder.status === 'preparing' && '制作中✨'}
               {activeOrder.status === 'delivering' && '配送中 😋'}

@@ -6,7 +6,6 @@ import type { Order } from '@/lib/types'
 import { formatPrice } from '@/lib/utils'
 import { ArrowLeft, Clock, Package } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
   pending:    { label: '待收单', color: '#f59e0b', bg: '#fef3c7' },
@@ -19,7 +18,6 @@ const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> =
 export default function MyOrdersPage({ params }: { params: Promise<{ merchantId: string }> }) {
   const { merchantId } = use(params)
   const supabase = createClient()
-  const router = useRouter()
 
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -69,23 +67,18 @@ export default function MyOrdersPage({ params }: { params: Promise<{ merchantId:
   const historyOrders = orders.filter(o => ['completed', 'cancelled'].includes(o.status))
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+    <div className="flex items-center justify-center min-h-screen bg-slate-50/50">
       <span className="spinner" />
     </div>
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-bg)' }}>
-      <header style={{
-        background: 'white', padding: '14px 20px',
-        display: 'flex', alignItems: 'center', gap: '10px',
-        borderBottom: '1px solid var(--color-border)',
-        position: 'sticky', top: 0, zIndex: 10,
-      }}>
-        <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-          <ArrowLeft size={22} color="#1c1917" />
-        </button>
-        <span style={{ fontWeight: '700', fontSize: '17px' }}>我的订单</span>
+    <div className="min-h-screen bg-slate-50/50">
+      <header className="sticky top-0 z-[60] bg-white/80 backdrop-blur-md border-b border-slate-100 px-5 h-14 flex items-center gap-4">
+        <Link href={`/m/${merchantId}`} className="p-2 -ml-2 hover:bg-slate-100 rounded-full transition-colors">
+          <ArrowLeft size={20} className="text-slate-600" />
+        </Link>
+        <h2 className="text-base font-black text-slate-800 tracking-tight leading-none">我的订单</h2>
       </header>
 
       <div style={{ padding: '16px 20px 40px' }}>

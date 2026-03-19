@@ -168,14 +168,14 @@ export default function OrderItemsCard({
 
       {/* 售后退款（售后处理后展示） */}
       {refundResolved && refundAmount && (
-        <div className="pt-3 border-t border-dashed border-slate-200 space-y-2">
-          <div className="flex justify-between items-center text-[11px] text-red-400 font-bold px-2">
+        <div className="pt-3 border-t border-dashed border-slate-100 space-y-1.5">
+          <div className="flex justify-between items-center text-[12px] text-rose-500 font-black px-2.5">
             <span>售后退款</span>
             <span className="tabular-nums">-{formatPrice(Number(refundAmount))}</span>
           </div>
-          <div className="flex justify-between items-center text-sm font-black bg-slate-900 text-white px-3 py-2 rounded-xl shadow-sm">
-            <span>实际结算支付</span>
-            <span className="text-base tracking-tight tabular-nums font-mono">
+          <div className="flex justify-between items-center text-sm font-black text-emerald-600 px-2.5 pt-1">
+            <span className="tracking-tight">实际结算支付</span>
+            <span className="text-xl tracking-tighter tabular-nums">
               {formatPrice(Math.max(0, totalAmount - Number(refundAmount)))}
             </span>
           </div>
