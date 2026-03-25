@@ -169,7 +169,7 @@ export default function DashboardPage() {
       supabase.removeChannel(channel)
       supabase.removeChannel(msgChannel)
     }
-  }, [merchant, supabase])
+  }, [merchant, supabase, loadData])
 
   // Fallback copy function for non-secure contexts
   const copyToClipboard = (text: string) => {
@@ -286,48 +286,84 @@ export default function DashboardPage() {
       </header>
 
       {/* 主体内容 */}
-      <main className="pt-20 max-w-2xl mx-auto px-4 space-y-8">
+      <main className="pt-20 max-w-2xl mx-auto px-4 space-y-6">
         {/* 数据概览 */}
         <section className="grid grid-cols-3 gap-3">
-          <Card className="border-none shadow-sm ring-1 ring-slate-100 bg-white rounded-3xl overflow-hidden transition-all active:scale-[0.98]">
-            <CardContent className="p-5 text-center flex flex-col items-center justify-center">
-              <div className="size-8 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-2">
-                <ClipboardList size={16} />
+          <Card className="border-none shadow-[0_2px_8px_rgba(0,0,0,0.02)] ring-1 ring-slate-100 bg-white rounded-[1.25rem] transition-all active:scale-[0.98]">
+            <CardContent className="p-3.5 flex flex-col items-center justify-center">
+              <div className="size-7 bg-blue-50/80 text-blue-500 rounded-lg flex items-center justify-center mb-1.5 text-blue-600">
+                <ClipboardList size={14} />
               </div>
-              <p className="text-2xl font-black text-slate-900 leading-none">{todayOrders.length}</p>
-              <p className="text-[11px] font-bold text-slate-400 mt-1.5">今日订单</p>
+              <p className="text-[20px] font-black text-slate-900 leading-none tracking-tight">{todayOrders.length}</p>
+              <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">今日订单</p>
             </CardContent>
           </Card>
-          <Card className="border-none shadow-sm ring-1 ring-slate-100 bg-white rounded-3xl overflow-hidden transition-all active:scale-[0.98]">
-            <CardContent className="p-5 text-center flex flex-col items-center justify-center">
-               <div className="size-8 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-2">
-                <span className="font-black text-sm">¥</span>
+          <Card className="border-none shadow-[0_2px_8px_rgba(0,0,0,0.02)] ring-1 ring-slate-100 bg-white rounded-[1.25rem] transition-all active:scale-[0.98]">
+            <CardContent className="p-3.5 flex flex-col items-center justify-center">
+               <div className="size-7 bg-emerald-50/80 text-emerald-500 rounded-lg flex items-center justify-center mb-1.5">
+                <span className="font-black text-xs">¥</span>
               </div>
-              <p className="text-xl font-black text-emerald-600 leading-none">{formatPrice(todayRevenue).replace('¥', '')}</p>
-              <p className="text-[11px] font-bold text-slate-400 mt-1.5">今日营收</p>
+              <p className="text-[18px] font-black text-emerald-600 leading-none tracking-tight">{formatPrice(todayRevenue).replace('¥', '')}</p>
+              <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">今日营收</p>
             </CardContent>
           </Card>
           <Card className={cn(
-            "border-none shadow-sm ring-1 rounded-3xl overflow-hidden transition-all active:scale-[0.98]",
+            "border-none shadow-[0_2px_8px_rgba(0,0,0,0.02)] ring-1 rounded-[1.25rem] transition-all active:scale-[0.98]",
             pendingCount > 0 ? "ring-orange-200 bg-orange-50/50" : "ring-slate-100 bg-white"
           )}>
-            <CardContent className="p-5 text-center flex flex-col items-center justify-center">
+            <CardContent className="p-3.5 flex flex-col items-center justify-center">
               <div className={cn(
-                "size-8 rounded-full flex items-center justify-center mb-2",
-                pendingCount > 0 ? "bg-orange-100 text-orange-600" : "bg-slate-50 text-slate-400"
+                "size-7 rounded-lg flex items-center justify-center mb-1.5",
+                pendingCount > 0 ? "bg-orange-100 text-orange-600 shadow-sm" : "bg-slate-50 text-slate-400"
               )}>
-                <Clock size={16} />
+                <Clock size={14} />
               </div>
               <p className={cn(
-                "text-2xl font-black leading-none",
+                "text-[20px] font-black leading-none tracking-tight",
                 pendingCount > 0 ? "text-orange-600 animate-pulse" : "text-slate-400"
               )}>{pendingCount}</p>
               <p className={cn(
-                "text-[11px] font-bold mt-1.5",
+                "text-[10px] font-bold mt-1 uppercase tracking-tight",
                 pendingCount > 0 ? "text-orange-500" : "text-slate-400"
               )}>待处理</p>
             </CardContent>
           </Card>
+        </section>
+        
+        {/* 快捷导航 (优化版: Squircle 风格) */}
+        <section className="-mx-4 overflow-hidden py-2">
+          <div className="px-6 mb-4">
+            <h2 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] leading-none">
+              管理快捷入口
+            </h2>
+          </div>
+          <div className="flex gap-5 overflow-x-auto px-6 pb-6 snap-x no-scrollbar select-none">
+            {NAV_ITEMS.map((item) => (
+              <Link key={item.href} href={item.href} className="group no-underline relative flex-shrink-0 snap-center">
+                <div className="flex flex-col items-center gap-3 transition-all duration-300 active:scale-95">
+                  <div className="size-[64px] rounded-[1.5rem] bg-white flex items-center justify-center shrink-0 shadow-[0_4px_12px_rgba(0,0,0,0.03)] border border-slate-100 transition-all group-hover:shadow-lg group-hover:shadow-slate-200/50 group-hover:-translate-y-1">
+                    <div className={cn("size-11 rounded-[1rem] flex items-center justify-center shrink-0 shadow-sm transition-transform", item.bg)}>
+                      {item.icon}
+                    </div>
+                  </div>
+                  <span className="text-[12px] font-bold text-slate-600 tracking-tight whitespace-nowrap">
+                    {item.label}
+                  </span>
+
+                  {/* 角标提醒 */}
+                  {item.badge ? (
+                    <span className="absolute top-0 right-0 translate-x-1.5 -translate-y-1.5 flex h-5 min-w-[20px] animate-pulse items-center justify-center rounded-full bg-orange-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-lg shadow-orange-100">
+                      !
+                    </span>
+                  ) : (item.count !== undefined && item.count > 0) ? (
+                    <span className="absolute top-0 right-0 translate-x-1.5 -translate-y-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-lg shadow-rose-100">
+                      {item.count}
+                    </span>
+                  ) : null}
+                </div>
+              </Link>
+            ))}
+          </div>
         </section>
 
         {/* 最新订单列表 */}
@@ -338,7 +374,7 @@ export default function DashboardPage() {
               最近订单
               {todayOrders.length > 0 && (
                 <Badge variant="secondary" className="bg-slate-100 text-slate-500 font-black h-5 px-2 rounded-full">
-                  前 5 单
+                  前 10 单
                 </Badge>
               )}
             </h2>
@@ -358,7 +394,7 @@ export default function DashboardPage() {
                 if (a.after_sales_status === 'pending' && b.after_sales_status !== 'pending') return -1;
                 if (a.after_sales_status !== 'pending' && b.after_sales_status === 'pending') return 1;
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-              }).slice(0, 5).map(order => (
+              }).slice(0, 10).map(order => (
                 <OrderCard
                   key={order.id}
                   order={order}
@@ -372,35 +408,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* 快捷导航 */}
-        <section>
-          <h2 className="text-[15px] font-black text-slate-900 tracking-tight mb-3 px-1">快捷功能</h2>
-          <div className="grid grid-cols-3 gap-3">
-            {NAV_ITEMS.map((item) => (
-              <Link key={item.href} href={item.href} className="group no-underline relative">
-                <div className="flex flex-col items-center gap-2 p-3 rounded-3xl bg-transparent transition-all duration-300 active:scale-95 active:bg-slate-100/50">
-                  <div className={cn("size-[52px] rounded-[1.25rem] flex items-center justify-center shrink-0 shadow-sm", item.bg)}>
-                    {item.icon}
-                  </div>
-                  <span className="text-[11px] font-black text-slate-700 tracking-tighter whitespace-nowrap text-center">
-                    {item.label}
-                  </span>
-
-                  {/* 角标提醒 */}
-                  {item.badge ? (
-                    <span className="absolute top-2 right-3 translate-x-1/2 flex h-5 min-w-[20px] animate-pulse items-center justify-center rounded-full bg-orange-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-sm">
-                      !
-                    </span>
-                  ) : (item.count !== undefined && item.count > 0) ? (
-                    <span className="absolute top-2 right-3 translate-x-1/2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-sm">
-                      {item.count}
-                    </span>
-                  ) : null}
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
       </main>
 
       {/* 侧边栏菜单 (手写适配) */}
@@ -465,6 +472,16 @@ export default function DashboardPage() {
           }}
         />
       )}
+      {/* 注入隐藏滚动条的样式 */}
+      <style jsx global>{`
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
     </div>
   )
 }

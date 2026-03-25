@@ -246,7 +246,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
                 </div>
               )}
 
-              {order.status !== 'cancelled' && order.status !== 'completed' && (
+              {order.status !== 'completed' && (
                 <div className="flex justify-center mb-5">
                   <div className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-slate-900 text-white rounded-full">
                     <Clock size={14} className="text-orange-400" />

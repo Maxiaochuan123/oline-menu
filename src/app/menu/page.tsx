@@ -8,7 +8,8 @@ import { useRouter } from 'next/navigation'
 import type { Merchant, Category, MenuItem } from '@/lib/types'
 import { 
   ArrowLeft, Plus, Pencil, Trash2, FolderOpen, Sparkles, Eye, EyeOff, UtensilsCrossed, 
-  LayoutGrid, Image as ImageIcon, Save, Check, CalendarIcon, AlertTriangle, Settings2
+  LayoutGrid, Image as ImageIcon, Save, Check, CalendarIcon, AlertTriangle, Settings2,
+  ChevronDown
 } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -38,17 +39,22 @@ import {
   FormItem,
   FormMessage,
 } from "@/components/ui/form"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer"
 import { useToast } from '@/components/common/Toast'
+
+// --- 常量 ---
+const COMMON_UNITS = ['份', '个', '斤', '两', '串', '打', '瓶', '听', '克']
 
 // --- 表单校验 Schema ---
 const itemSchema = z.object({
@@ -121,7 +127,6 @@ export default function MenuPage() {
 
     const { data: cats } = await supabase.from('categories').select('*').eq('merchant_id', m.id).order('sort_order')
     setCategories(cats || [])
-    if (cats && cats.length > 0 && !activeCategory) setActiveCategory(cats[0].id)
 
     const { data: items } = await supabase.from('menu_items').select('*').eq('merchant_id', m.id).order('created_at', { ascending: false })
     const fetchedItems = items || []
@@ -139,7 +144,7 @@ export default function MenuPage() {
     }
 
     setLoading(false)
-  }, [supabase, router, activeCategory])
+  }, [supabase, router])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -180,14 +185,19 @@ export default function MenuPage() {
   }
 
   // ---- 菜品操作 ----
-  function openItemForm(item?: MenuItem) {
+  function openItemForm(item?: MenuItem, defaultCategoryId?: string) {
+    if (categories.length === 0) {
+      toast('您还没有创建任何菜品分类，请先创建分类吧', 'warning')
+      setShowCatManager(true)
+      return
+    }
     if (item) {
       setEditingItem(item)
       itemForm.reset({
         name: item.name,
         description: item.description || '',
         price: item.price as unknown as number,
-        unit: item.unit || '个',
+        unit: item.unit || '份',
         category_id: item.category_id || '',
         is_new: item.is_new,
         new_until: item.new_until ? new Date(item.new_until) : null,
@@ -201,8 +211,8 @@ export default function MenuPage() {
         name: '',
         description: '',
         price: '' as unknown as number,
-        unit: '个',
-        category_id: '',
+        unit: '份',
+        category_id: defaultCategoryId || (activeCategory || ''),
         is_new: true,
         new_until: date,
       })
@@ -307,7 +317,7 @@ export default function MenuPage() {
             <h1 className="text-base font-black tracking-tight leading-none">菜单管理</h1>
           </div>
         </div>
-        <Button size="sm" onClick={() => openItemForm()} className="bg-orange-500 hover:bg-orange-600 font-black rounded-xl gap-1.5 shadow-lg shadow-orange-100">
+        <Button size="sm" onClick={() => openItemForm(undefined, activeCategory || undefined)} className="bg-orange-500 hover:bg-orange-600 font-black rounded-xl gap-1.5 shadow-lg shadow-orange-100">
           <Plus size={16} strokeWidth={3} />
           添加菜品
         </Button>
@@ -368,7 +378,13 @@ export default function MenuPage() {
               <FolderOpen size={48} className="text-slate-200" />
             </div>
             <h3 className="font-black text-slate-900 text-lg">暂无菜品数据</h3>
-            <p className="text-xs text-slate-400 font-medium mt-1 uppercase tracking-widest">开启您的美食之旅</p>
+            <p className="text-xs text-slate-400 font-medium mt-1 uppercase tracking-widest mb-6 px-10">开始添加您的第一个菜品到此分类吧</p>
+            <Button 
+               onClick={() => openItemForm(undefined, activeCategory || undefined)}
+               className="bg-orange-500 hover:bg-orange-600 text-white rounded-2xl px-8 h-12 font-black shadow-xl shadow-orange-100 gap-2 active:scale-95 transition-all"
+            >
+              <Plus size={20} strokeWidth={3} /> 立即添加
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4">
@@ -510,9 +526,9 @@ export default function MenuPage() {
 
       {/* 菜品编辑弹窗 */}
       <Dialog open={showItemForm} onOpenChange={setShowItemForm}>
-        <DialogContent className="sm:max-w-[425px] rounded-3xl p-6 max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[425px] rounded-3xl p-6 max-h-[90vh] overflow-y-auto custom-scrollbar">
           <DialogHeader>
-            <DialogTitle className="text-xl font-black tracking-tight">
+            <DialogTitle className="text-xl font-black tracking-tight text-slate-900 text-left">
               {editingItem ? '编辑菜品详情' : '创建新菜品'}
             </DialogTitle>
           </DialogHeader>
@@ -521,30 +537,29 @@ export default function MenuPage() {
             <form onSubmit={itemForm.handleSubmit(saveItem, onInvalid)} className="space-y-5 py-4">
               {/* 图片上传区域 */}
               <div className="group relative">
-                <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2 block">菜品展示图</Label>
-                <div className="relative aspect-video rounded-3xl overflow-hidden bg-slate-50 border-2 border-dashed border-slate-200 group-hover:border-orange-200 transition-all flex flex-col items-center justify-center gap-3">
+                <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2 block ml-1">菜品展示图</Label>
+                <div className="relative aspect-video rounded-[32px] overflow-hidden bg-slate-50 border-2 border-dashed border-slate-200 group-hover:border-orange-200 transition-all flex flex-col items-center justify-center gap-3">
                   {itemImagePreview ? (
                     <>
                       <Image 
                         src={itemImagePreview} 
                         alt="Preview" 
-                        width={400} 
-                        height={225} 
-                        className="size-full object-cover" 
+                        fill
+                        className="object-cover" 
                         unoptimized
                       />
-                      <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <Button variant="secondary" size="sm" type="button" className="rounded-full font-black">更换图片</Button>
+                      <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[2px]">
+                        <Button variant="secondary" size="sm" type="button" className="rounded-full font-black shadow-lg">更换图片</Button>
                       </div>
                     </>
                   ) : (
                     <>
-                      <div className="size-12 bg-white rounded-2xl flex items-center justify-center shadow-sm text-slate-300">
-                        <ImageIcon size={24} />
+                      <div className="size-14 bg-white rounded-2xl flex items-center justify-center shadow-sm text-slate-300">
+                        <ImageIcon size={28} />
                       </div>
                       <div className="text-center">
-                        <p className="text-xs font-black text-slate-500">点击或拖拽上传</p>
-                        <p className="text-[10px] text-slate-300 font-medium mt-0.5">支持 JPG, PNG, WEBP</p>
+                        <p className="text-sm font-black text-slate-600">点击或拖拽上传</p>
+                        <p className="text-[10px] text-slate-400 font-bold mt-1 tracking-wider">支持 JPG, PNG (2MB以内)</p>
                       </div>
                     </>
                   )}
@@ -553,120 +568,134 @@ export default function MenuPage() {
                     accept="image/*" 
                     onChange={e => {
                       const file = e.target.files?.[0] || null
-                      setItemImage(file)
-                      if (file) setItemImagePreview(URL.createObjectURL(file))
+                      if (file) {
+                         setItemImage(file)
+                         setItemImagePreview(URL.createObjectURL(file))
+                      }
                     }} 
                     className="absolute inset-0 opacity-0 cursor-pointer"
                   />
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <div className="space-y-2 relative">
-                  <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">基本信息</Label>
-                  <FormField
-                    control={itemForm.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem className="space-y-0">
-                        <FormControl>
-                          <Input 
-                            placeholder="菜品名称 *" 
-                            className="rounded-xl bg-slate-50 border-none font-bold placeholder:font-medium" 
-                            {...field} 
-                          />
-                        </FormControl>
-                        <FormMessage className="text-[10px] ml-1 absolute" />
-                      </FormItem>
-                    )}
-                  />
-                  <div className="h-1.5" />
-                  <FormField
-                    control={itemForm.control}
-                    name="description"
-                    render={({ field }) => (
-                      <FormItem className="space-y-0 relative">
-                        <FormControl>
-                          <Input 
-                            placeholder="描述：选填，介绍菜品特色" 
-                            className="rounded-xl bg-slate-50 border-none font-bold placeholder:font-medium" 
-                            {...field} 
-                          />
-                        </FormControl>
-                        <FormMessage className="text-[10px] ml-1 absolute" />
-                      </FormItem>
-                    )}
-                  />
+                  <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">基本信息</Label>
+                  <div className="space-y-1.5">
+                    <FormField
+                      control={itemForm.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem className="space-y-0 relative">
+                          <FormControl>
+                            <Input 
+                              placeholder="菜品名称 *" 
+                              className="h-11 rounded-2xl bg-slate-50 border-none font-black text-slate-800 placeholder:font-bold focus:ring-2 focus:ring-orange-500 transition-all" 
+                              {...field} 
+                            />
+                          </FormControl>
+                          <FormMessage className="text-[10px] ml-1 absolute" />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={itemForm.control}
+                      name="description"
+                      render={({ field }) => (
+                        <FormItem className="space-y-0 relative">
+                          <FormControl>
+                            <Input 
+                              placeholder="描述：选填，介绍菜品特色" 
+                              className="h-11 rounded-2xl bg-slate-50 border-none font-bold text-slate-600 placeholder:font-medium text-xs" 
+                              {...field} 
+                            />
+                          </FormControl>
+                          <FormMessage className="text-[10px] ml-1 absolute" />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">价格策略</Label>
-                    <div className="flex gap-2 relative">
-                      <FormField
-                        control={itemForm.control}
-                        name="price"
-                        render={({ field }) => (
-                          <FormItem className="flex-1 space-y-0">
-                            <FormControl>
+                    <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">价格设置</Label>
+                    <FormField
+                      control={itemForm.control}
+                      name="price"
+                      render={({ field }) => (
+                        <FormItem className="space-y-0 relative">
+                          <FormControl>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 font-black text-orange-500 text-sm">¥</span>
                               <Input 
                                 type="number" 
                                 step="0.01" 
-                                placeholder="价格 *" 
-                                className="rounded-xl bg-slate-50 border-none font-black text-orange-500" 
+                                placeholder="0.00" 
+                                className="h-11 pl-7 rounded-2xl bg-slate-50 border-none font-black text-orange-500 text-base" 
                                 {...field} 
                                 value={field.value ?? ''}
+                                onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                               />
-                            </FormControl>
-                            <FormMessage className="text-[10px] ml-1 mt-1 absolute" />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={itemForm.control}
-                        name="unit"
-                        render={({ field }) => (
-                        <FormItem className="w-20 space-y-0 shrink-0">
-                          <Select onValueChange={field.onChange} value={field.value || '个'}>
-                            <FormControl>
-                              <SelectTrigger className="rounded-xl bg-slate-50 border-none font-black text-xs px-2 focus:ring-2 focus:ring-orange-500 outline-none">
-                                <SelectValue placeholder="单位">
-                                  {field.value ? `/ ${field.value}` : '单位'}
-                                </SelectValue>
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {['个', '份', '碗', '杯', '斤', '盒', '袋'].map(u => (
-                                <SelectItem key={u} value={u}>/ {u}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            </div>
+                          </FormControl>
+                          <FormMessage className="text-[10px] ml-1 mt-1 absolute" />
                         </FormItem>
-                        )}
-                      />
-                    </div>
+                      )}
+                    />
                   </div>
                   <div className="space-y-2 relative">
-                    <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400">所属分类</Label>
+                    <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">计费单位</Label>
                     <FormField
                       control={itemForm.control}
-                      name="category_id"
+                      name="unit"
                       render={({ field }) => (
                         <FormItem className="space-y-0">
-                          <Select onValueChange={field.onChange} value={field.value || ""}>
-                            <FormControl>
-                              <SelectTrigger className="w-full h-10 rounded-xl bg-slate-50 border-none font-black text-xs px-3 focus:ring-2 focus:ring-orange-500 outline-none">
-                                <SelectValue placeholder="请选择分类">
-                                  {field.value && field.value !== "" 
-                                    ? categories.find(c => c.id === field.value)?.name 
-                                    : "请选择分类"}
-                                </SelectValue>
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                          <Drawer>
+                            <DrawerTrigger asChild>
+                              <div className="w-full h-11 rounded-2xl bg-slate-50 border-none font-black text-sm px-4 flex items-center justify-between cursor-pointer active:bg-slate-100 transition-all group">
+                                <span className={cn(field.value ? "text-slate-900" : "text-slate-400")}>
+                                  {field.value || "选单位"}
+                                </span>
+                                <ChevronDown size={14} className="text-slate-300 group-hover:text-slate-400 transition-colors" />
+                              </div>
+                            </DrawerTrigger>
+                            <DrawerContent className="rounded-t-[32px]">
+                              <DrawerHeader className="pb-4">
+                                <DrawerTitle className="text-center font-black">选择计费单位</DrawerTitle>
+                              </DrawerHeader>
+                              <div className="p-5 grid grid-cols-3 gap-2.5">
+                                {COMMON_UNITS.map(u => (
+                                  <div 
+                                    key={u}
+                                    onClick={() => field.onChange(u)}
+                                    className={cn(
+                                      "h-12 flex items-center justify-center rounded-2xl font-black text-sm border-2 transition-all active:scale-95",
+                                      field.value === u 
+                                        ? "bg-orange-500 border-orange-500 text-white shadow-lg shadow-orange-100" 
+                                        : "bg-slate-50 border-transparent text-slate-600 hover:bg-slate-100"
+                                    )}
+                                  >
+                                    {u}
+                                  </div>
+                                ))}
+                                <div className="col-span-3 mt-4">
+                                  <div className="text-[11px] text-slate-400 font-black uppercase tracking-wider mb-2 ml-1">手动输入其他单位</div>
+                                  <Input 
+                                    value={COMMON_UNITS.includes(field.value) ? "" : field.value}
+                                    onChange={(e) => field.onChange(e.target.value)}
+                                    placeholder="如：两、扎、打、盒..."
+                                    className="h-12 rounded-2xl bg-slate-50 border-none font-bold text-sm px-5 focus:ring-2 focus:ring-orange-500"
+                                  />
+                                </div>
+                              </div>
+                              <div className="p-5 pt-0 pb-safe">
+                                <DrawerClose asChild>
+                                  <Button className="w-full h-14 rounded-2xl bg-slate-900 text-white font-black shadow-xl active:scale-[0.98] transition-transform">确认使用该单位</Button>
+                                </DrawerClose>
+                              </div>
+                            </DrawerContent>
+                          </Drawer>
                           <FormMessage className="text-[10px] ml-1 mt-1 absolute" />
                         </FormItem>
                       )}
@@ -674,26 +703,77 @@ export default function MenuPage() {
                   </div>
                 </div>
 
+                <div className="space-y-2 relative">
+                  <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">所属分类</Label>
+                  <FormField
+                    control={itemForm.control}
+                    name="category_id"
+                    render={({ field }) => (
+                      <FormItem className="space-y-0">
+                        <Drawer>
+                          <DrawerTrigger asChild>
+                            <div className="w-full h-11 rounded-2xl bg-slate-50 border-none font-black text-sm px-4 flex items-center justify-between cursor-pointer active:bg-slate-100 transition-all group">
+                              <span className={cn(field.value ? "text-slate-900" : "text-slate-400")}>
+                                {categories.find(c => c.id === field.value)?.name || "请选择分类"}
+                              </span>
+                              <ChevronDown size={14} className="text-slate-300 group-hover:text-slate-400 transition-colors" />
+                            </div>
+                          </DrawerTrigger>
+                          <DrawerContent className="rounded-t-[32px]">
+                            <DrawerHeader className="pb-4">
+                              <DrawerTitle className="text-center font-black">菜品所属分类</DrawerTitle>
+                              <DrawerDescription className="text-center text-[11px] font-bold">分类准确能让用户买得更多</DrawerDescription>
+                            </DrawerHeader>
+                            <div className="p-5 space-y-2.5 overflow-y-auto max-h-[45vh] custom-scrollbar">
+                              {categories.map(c => (
+                                <div 
+                                  key={c.id}
+                                  onClick={() => field.onChange(c.id)}
+                                  className={cn(
+                                    "h-14 flex items-center justify-between px-6 rounded-2xl border-2 transition-all active:scale-[0.98]",
+                                    field.value === c.id 
+                                      ? "bg-orange-50 border-orange-200 text-orange-600" 
+                                      : "bg-white border-slate-50 text-slate-700 hover:border-slate-100"
+                                  )}
+                                >
+                                  <span className="font-black text-[15px]">{c.name}</span>
+                                  {field.value === c.id && <div className="p-1 bg-orange-500 rounded-full"><Check size={14} className="text-white" strokeWidth={4} /></div>}
+                                </div>
+                              ))}
+                            </div>
+                            <div className="p-5 pt-0 pb-safe">
+                              <DrawerClose asChild>
+                                <Button className="w-full h-14 rounded-2xl bg-slate-900 text-white font-black shadow-xl">确认并关闭</Button>
+                              </DrawerClose>
+                            </div>
+                          </DrawerContent>
+                        </Drawer>
+                        <FormMessage className="text-[10px] ml-1 mt-1 absolute" />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
                 <div className="h-1" />
                 <FormField
                   control={itemForm.control}
                   name="is_new"
                   render={({ field }) => (
-                    <FormItem className="flex items-center justify-between p-3 rounded-2xl bg-orange-50/50 border border-orange-100 space-y-0 flex-row">
-                      <div className="flex items-center gap-2">
-                        <div className="size-8 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600">
-                          <Sparkles size={16} fill="currentColor" />
+                    <FormItem className="flex items-center justify-between p-4 rounded-3xl bg-orange-50/50 border border-orange-100 space-y-0 flex-row">
+                      <div className="flex items-center gap-3">
+                        <div className="size-10 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600 shadow-inner">
+                          <Sparkles size={18} fill="currentColor" />
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-xs font-black text-orange-900">新品推荐</span>
-                          <span className="text-[10px] text-orange-500 font-medium leading-none">增加在点单页的曝光度</span>
+                          <span className="text-sm font-black text-orange-950">作为新品推荐</span>
+                          <span className="text-[11px] text-orange-500/80 font-bold leading-none">获得点单页专属曝光位</span>
                         </div>
                       </div>
                       <FormControl>
                         <Checkbox 
                           checked={field.value} 
                           onCheckedChange={field.onChange}
-                          className="size-5 rounded-lg border-orange-300 text-orange-500 data-[state=checked]:bg-orange-500 data-[state=checked]:text-white focus:ring-orange-500 transition-all cursor-pointer"
+                          className="size-6 rounded-xl border-orange-300 text-orange-500 data-[state=checked]:bg-orange-500 data-[state=checked]:text-white focus:ring-orange-500 transition-all cursor-pointer shadow-sm"
                         />
                       </FormControl>
                     </FormItem>
@@ -701,32 +781,28 @@ export default function MenuPage() {
                 />
 
                 {itemForm.watch('is_new') && (
-                  <div className="animate-in slide-in-from-top-2 duration-300 flex items-center justify-between">
-                    <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 block ml-1">展示截止至</Label>
+                  <div className="animate-in slide-in-from-top-2 duration-300 flex items-center justify-between px-1">
+                    <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 block">新品截止日期</Label>
                     <FormField
                       control={itemForm.control}
                       name="new_until"
                       render={({ field }) => (
                         <FormItem className="space-y-0 relative">
                           <Popover>
-                            <PopoverTrigger
-                              className={cn(
-                                "w-[140px] rounded-xl bg-slate-50 border-none font-black text-xs h-10 px-3 flex items-center justify-between transition-all active:scale-95",
+                            <PopoverTrigger>
+                              <div className={cn(
+                                "min-w-[140px] rounded-2xl bg-slate-50 border-none font-black text-xs h-11 px-4 flex items-center justify-between transition-all active:scale-95 cursor-pointer",
                                 !field.value && "text-slate-400"
-                              )}
-                            >
+                              )}>
                                 <FormControl>
-                                  <div className="flex items-center justify-between w-full">
-                                    {field.value ? (
-                                      format(field.value, "y年MM月dd日")
-                                    ) : (
-                                      <span>选择截止日期</span>
-                                    )}
-                                    <CalendarIcon className="size-4 opacity-50" />
+                                  <div className="flex items-center justify-between gap-2">
+                                    {field.value ? format(field.value, "y年MM月dd日") : "永不截止"}
+                                    <CalendarIcon className="size-4 opacity-40 shrink-0" />
                                   </div>
                                 </FormControl>
+                              </div>
                             </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0 rounded-2xl border-none shadow-xl" align="end">
+                            <PopoverContent className="w-auto p-0 rounded-3xl border-none shadow-2xl" align="end">
                               <Calendar
                                 mode="single"
                                 selected={field.value || undefined}
@@ -746,11 +822,10 @@ export default function MenuPage() {
             </form>
           </Form>
 
-
-          <DialogFooter className="mt-4 pb-2">
+          <DialogFooter className="mt-2 pb-0">
             <Button 
               type="button"
-              className="w-full h-14 rounded-2xl bg-slate-900 hover:bg-black font-black text-white gap-2 shadow-xl shadow-slate-200 transition-all active:scale-95"
+              className="w-full h-14 rounded-3xl bg-slate-900 hover:bg-black font-black text-white gap-2 shadow-xl shadow-slate-200 transition-all active:scale-95"
               onClick={itemForm.handleSubmit(saveItem, onInvalid)}
               disabled={saving}
             >

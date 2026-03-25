@@ -133,7 +133,7 @@ export interface Coupon {
   title: string
   amount: number
   min_spend: number
-  is_global: boolean
+  is_newcomer_reward: boolean
   expiry_days: number
   status: 'active' | 'disabled'
   target_type: CouponTargetType   // 定向类型：all=全场, category=指定分类, customer=指定用户

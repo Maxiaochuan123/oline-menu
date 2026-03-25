@@ -54,13 +54,22 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
             animation: 'slideIn 0.3s ease-out forwards',
             pointerEvents: 'auto',
             border: '1px solid #f0f0f0',
-            minWidth: '200px'
+            minWidth: '280px',
+            maxWidth: '90vw',
+            width: 'max-content'
           }}>
-            {t.type === 'success' && <CheckCircle size={18} color="#10b981" />}
-            {t.type === 'error' && <AlertCircle size={18} color="#ef4444" />}
-            {t.type === 'info' && <Info size={18} color="#3b82f6" />}
-            {t.type === 'warning' && <AlertCircle size={18} color="#f59e0b" />}
-            <span style={{ fontSize: '14px', fontWeight: '500', color: '#374151' }}>{t.message}</span>
+            {t.type === 'success' && <CheckCircle size={18} color="#10b981" className="shrink-0" />}
+            {t.type === 'error' && <AlertCircle size={18} color="#ef4444" className="shrink-0" />}
+            {t.type === 'info' && <Info size={18} color="#3b82f6" className="shrink-0" />}
+            {t.type === 'warning' && <AlertCircle size={18} color="#f59e0b" className="shrink-0" />}
+            <span style={{ 
+              fontSize: '14px', 
+              fontWeight: '600', 
+              color: '#374151',
+              lineHeight: '1.5',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all'
+            }}>{t.message}</span>
             <button onClick={() => setToasts(prev => prev.filter(toast => toast.id !== t.id))} style={{
                 marginLeft: 'auto',
                 background: 'none',

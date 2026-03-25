@@ -6,7 +6,7 @@ import type { Merchant, Category, MenuItem, CartItem, Order, UserCoupon, Coupon,
 import { formatPrice, isWechat, isValidPhone, cn } from '@/lib/utils'
 import { calcDiscount, getVipLevel, VIP_LEVELS, getPointsToNextLevel, getCouponEligibleAmount } from '@/lib/membership'
 import {
-  Plus, Minus, ShoppingBag, Search, X, CheckCircle,
+  Plus, Minus, ShoppingBag, Search, X, CheckCircle, Sparkles,
   MapPin, Phone, User, Clock, Briefcase, UserRound, ArrowRight, Package, Gift, Star, ChevronRight
 } from 'lucide-react'
 import { format } from 'date-fns'
@@ -16,6 +16,27 @@ import WechatGuide from '@/components/customer/WechatGuide'
 import NewItemsCarousel from '@/components/customer/NewItemsCarousel'
 import MenuSkeleton from '@/components/customer/MenuSkeleton'
 import DraggableCouponButton from '@/components/customer/DraggableCouponButton'
+import { z } from 'zod'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { Form, FormControl, FormField, FormItem, FormMessage, FormLabel } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Calendar } from "@/components/ui/calendar"
+import { TimePicker } from "@/components/ui/time-picker"
+import { CalendarIcon } from 'lucide-react'
+import { zhCN } from "date-fns/locale"
+import { buttonVariants } from "@/components/ui/button"
+
+const orderSchema = z.object({
+  customerName: z.string().min(1, '怎么称呼您？'),
+  phone: z.string().regex(/^1[3-9]\d{9}$/, '请输入有效的手机号'),
+  scheduledTime: z.string().min(1, '请选择预定时间'),
+  address: z.string().min(1, '请输入详细配送地址'),
+})
+type OrderFormValues = z.infer<typeof orderSchema>
 
 export default function ClientMenuPage({ params }: { params: Promise<{ merchantId: string }> }) {
   const { merchantId } = use(params)
@@ -46,10 +67,17 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   
   // 表单数据
   const [orderType, setOrderType] = useState<'personal' | 'company'>('personal')
-  const [customerName, setCustomerName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [address, setAddress] = useState('')
-  const [scheduledTime, setScheduledTime] = useState('')
+  const form = useForm<OrderFormValues>({
+    resolver: zodResolver(orderSchema),
+    defaultValues: {
+      customerName: '',
+      phone: '',
+      address: '',
+      scheduledTime: ''
+    }
+  })
+  const formPhone = form.watch('phone')
+  
   const [submitting, setSubmitting] = useState(false)
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false)
 
@@ -66,12 +94,20 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const [showVipInfo, setShowVipInfo] = useState(false)
   const [showCouponPicker, setShowCouponPicker] = useState(false)
   const [showLoginBanner, setShowLoginBanner] = useState(false)
+  const [showLoginModal, setShowLoginModal] = useState(false)
+  const [showCheckoutLoginPrompt, setShowCheckoutLoginPrompt] = useState(false)
+  const [loginPhone, setLoginPhone] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [welcomeCouponAmount, setWelcomeCouponAmount] = useState(5)
   const [showCouponCenter, setShowCouponCenter] = useState(false)
   const [couponCenterTab, setCouponCenterTab] = useState<'claim' | 'unused' | 'used' | 'invalid'>('claim')
   const [claimLoading, setClaimLoading] = useState<string | null>(null)
   // 是否由用户手动切换过优惠券（手动选过后不再自动覆盖）
   const [couponManuallySet, setCouponManuallySet] = useState(false)
-  const [formError, setFormError] = useState(false)
+  const [balls, setBalls] = useState<{ id: number, startX: number, startY: number, endX: number, endY: number }[]>([])
+  const [isBagShaking, setIsBagShaking] = useState(false)
+  const bagRef = useRef<HTMLDivElement>(null)
+  const nextBallId = useRef(0)
 
   const itemsRef = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -79,16 +115,17 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     setIsWechatEnv(isWechat())
     loadData()
 
-
-
     // 尝试带出用户信息
     const lastUser = localStorage.getItem(`customer_info_${merchantId}`)
     if (lastUser) {
       try {
         const info = JSON.parse(lastUser)
-        setCustomerName(info.name)
-        setPhone(info.phone)
-        setAddress(info.address)
+        form.reset({ 
+          customerName: info.name || '', 
+          phone: info.phone || '', 
+          address: info.address || '', 
+          scheduledTime: '' 
+        })
         loadActiveOrder(info.phone)
         loadCustomerBenefits(info.phone)
       } catch { /* ignore */ }
@@ -97,7 +134,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       setTimeout(() => setShowLoginBanner(true), 1500)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [merchantId])
+  }, [merchantId, form])
 
   useEffect(() => {
     localStorage.setItem(`cart_${merchantId}`, JSON.stringify(cart))
@@ -105,11 +142,39 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
   // 手机号填写完整后（11位）自动加载积分和优惠券
   useEffect(() => {
-    if (phone.length === 11) {
-      loadCustomerBenefits(phone)
+    if (formPhone?.length === 11) {
+      loadCustomerBenefits(formPhone)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phone])
+  }, [formPhone])
+
+  /** 初始化默认配送时间：今天 + 建议的时间点 */
+  useEffect(() => {
+    if (merchant && !form.getValues('scheduledTime')) {
+      const openTime = merchant.business_hours?.open_time || '09:00'
+      const closeTime = merchant.business_hours?.close_time || '22:00'
+      
+      const now = new Date()
+      const future = new Date(now.getTime() + 30 * 60000)
+      const fh = future.getHours()
+      const fm = future.getMinutes()
+      const tStr = `${fh.toString().padStart(2, '0')}:${fm.toString().padStart(2, '0')}`
+      
+      let finalTime = tStr
+      if (tStr < openTime) finalTime = openTime
+      else if (tStr > closeTime) finalTime = openTime // 如果今天已关门，默认明天开门
+
+      const [hh, mm] = finalTime.split(':')
+      const defaultDate = new Date()
+      // 如果此刻已经过了营业时间，默认日期设为明天
+      if (tStr > closeTime) {
+        defaultDate.setDate(defaultDate.getDate() + 1)
+      }
+      defaultDate.setHours(parseInt(hh), parseInt(mm), 0, 0)
+      
+      form.setValue('scheduledTime', format(defaultDate, "yyyy-MM-dd'T'HH:mm"))
+    }
+  }, [merchant, form])
 
   // 处理登录后重定向自动发券
   useEffect(() => {
@@ -150,7 +215,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
   // 实时订阅进行中订单状态变更
   useEffect(() => {
-    if (!phone) return
+    if (!formPhone) return
     const channel = supabase
       .channel('menu-active-order')
       .on('postgres_changes',
@@ -166,7 +231,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         }
       ).subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [phone, supabase])
+  }, [formPhone, supabase])
 
   async function loadData() {
     const [mRes, cRes, iRes, centerRes, dRes] = await Promise.all([
@@ -184,7 +249,11 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       if (cRes.data.length > 0) setActiveCategory(cRes.data[0].id)
     }
     if (iRes.data) setMenuItems(iRes.data)
-    if (centerRes.data) setCenterCoupons(centerRes.data)
+    if (centerRes.data) {
+      setCenterCoupons(centerRes.data)
+      const global = centerRes.data.find((c: Coupon) => c.is_newcomer_reward && c.status === 'active')
+      if (global) setWelcomeCouponAmount(global.amount)
+    }
     if (dRes.data) setDisabledDates(dRes.data)
     setLoading(false)
   }
@@ -230,7 +299,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   async function handleClaimCoupon(coupon: Coupon, isAutoClaim = false) {
     if (!customerId) {
       localStorage.setItem('pending_claim_coupon', coupon.id)
-      router.push(`/login?redirect=/m/${merchantId}`)
+      setShowLoginModal(true)
       return
     }
     setClaimLoading(coupon.id)
@@ -243,7 +312,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       if (error) throw error
       if (success) {
         toast(isAutoClaim ? `欢迎回来！为您自动领取了【${coupon.title}】` : '抢券成功！', 'success')
-        if (phone) loadCustomerBenefits(phone)
+        if (formPhone) loadCustomerBenefits(formPhone)
         loadData() // 刷新余量
       } else {
         toast(isAutoClaim ? `【${coupon.title}】您已经领过或已被抢光啦` : '抢券失败：您可能已经领过，或者已经被抢完啦！', 'warning')
@@ -255,7 +324,107 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     }
   }
 
-  function addToCart(item: MenuItem) {
+  // ==== 客户端弹窗登录 / 领取新人福利 ====
+  async function handleClientLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!isValidPhone(loginPhone)) {
+      toast('请输入有效的手机号（1开头，11位数字）', 'error')
+      return
+    }
+    setLoginLoading(true)
+
+    try {
+      const { data: existing } = await supabase
+        .from('customers')
+        .select('id, name, address')
+        .eq('merchant_id', merchantId)
+        .eq('phone', loginPhone)
+        .maybeSingle()
+
+      let cId = existing?.id
+
+      if (!existing) {
+        // 新注册用户，创建并自动发放全局满减券
+        const { data: newCust, error: insertErr } = await supabase
+          .from('customers')
+          .insert({ merchant_id: merchantId, phone: loginPhone })
+          .select('id')
+          .single()
+        if (insertErr) throw insertErr
+        cId = newCust.id
+
+        const { data: globalCoupons } = await supabase
+          .from('coupons')
+          .select('id, expiry_days, title')
+          .eq('merchant_id', merchantId)
+          .eq('is_newcomer_reward', true)
+          .eq('status', 'active')
+
+        if (globalCoupons && globalCoupons.length > 0 && cId) {
+          let claimedCount = 0
+          const claimedNames: string[] = []
+          for (const coupon of globalCoupons) {
+            const expiresAt = new Date()
+            expiresAt.setDate(expiresAt.getDate() + (coupon.expiry_days ?? 7))
+            const { data: success } = await supabase.rpc('claim_coupon', {
+              p_coupon_id: coupon.id,
+              p_customer_id: cId,
+              p_expires_at: expiresAt.toISOString()
+            })
+            if (success) {
+              claimedCount++
+              claimedNames.push(coupon.title)
+            }
+          }
+          if (claimedCount > 0) {
+            toast(`欢迎新朋友！已为您自动发放新人专属优惠券：\n${claimedNames.join('、')}`, 'success')
+          }
+        }
+      }
+
+      // 同步本地登录状态与表单缓存
+      localStorage.setItem(`customer_info_${merchantId}`, JSON.stringify({ phone: loginPhone, name: existing?.name || '', address: existing?.address || '' }))
+      
+      form.setValue('phone', loginPhone)
+      if (existing?.name) form.setValue('customerName', existing.name)
+      if (existing?.address) form.setValue('address', existing.address)
+      
+      setCustomerId(cId || null)
+      await loadCustomerBenefits(loginPhone)
+      setShowLoginModal(false)
+      setShowLoginBanner(false)
+      toast('登录成功', 'success')
+
+    } catch (err: unknown) {
+      toast(err instanceof Error ? err.message : '操作失败，请重试', 'error')
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  function addToCart(item: MenuItem, event?: React.MouseEvent) {
+    if (event && bagRef.current) {
+      const bagRect = bagRef.current.getBoundingClientRect()
+      const startX = event.clientX
+      const startY = event.clientY
+      const endX = bagRect.left + bagRect.width / 2
+      const endY = bagRect.top + bagRect.height / 2
+      
+      const ballId = nextBallId.current++
+      setBalls(prev => [...prev, { id: ballId, startX, startY, endX, endY }])
+      
+      // 购物车图标在动画即将完成时抖动
+      setTimeout(() => {
+        setIsBagShaking(true)
+        setTimeout(() => setIsBagShaking(false), 400)
+      }, 500)
+
+      // 清理数据
+      setTimeout(() => {
+        setBalls(prev => prev.filter(b => b.id !== ballId))
+      }, 700)
+    }
+
     setCart(prev => {
       const existing = prev.find(i => i.menuItem.id === item.id)
       if (existing) {
@@ -363,28 +532,22 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const vipLevel = discountResult.vipLevel
   const vipDiscountAmount = discountResult.vipDiscountAmount
 
-  // 动态计算底部区域高度（购物车栏56px + 折扣明细区）
+  // 动态计算底部区域高度（用于给菜单列表留出充足的 paddingBottom，避免遮挡最后几个菜）
+  const nextLevelInfo = getPointsToNextLevel(customerPoints + Math.floor(totalAmount));
   const discountRowCount = totalCount > 0 ? [
-    vipLevel.rate < 1,
-    !!(selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0),
-    availableCoupons.length > 0 && selectedCoupons.length === 0,
-    !!couponHint,
-    (customerPoints + Math.floor(totalAmount) < 100) || !!getPointsToNextLevel(customerPoints + Math.floor(totalAmount)),
+    vipLevel.rate < 1 || !!nextLevelInfo, // VIP+等级进度行
+    !!(selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0), // 优惠券行
+    !!(couponHint && couponHint.type !== '达标'), // 凑单提示行
   ].filter(Boolean).length : 0
   
-  // 基础 56px + (每行32px + 底部留白20px)
-  const bottomBarHeight = totalCount > 0 ? 72 + (discountRowCount > 0 ? discountRowCount * 32 + 24 : 0) : 0
+  // 购物车底栏约 72px + 折扣区域高度 (每行约 24px + 区域间距和 padding 约 40px)
+  const bottomAreaTotalHeight = totalCount > 0 
+    ? 72 + (discountRowCount > 0 ? discountRowCount * 24 + 40 : 0) 
+    : 0;
+  const bottomBarHeight = bottomAreaTotalHeight + 10; // 再额外多留 10px 呼吸感
 
-  async function handleSubmitOrder() {
-    if (!customerName || !phone || !address || !scheduledTime) {
-      setFormError(true)
-      toast('请完善红色高亮的配送信息', 'warning')
-      return
-    }
-    if (!isValidPhone(phone)) {
-      toast('手机号格式不正确', 'error')
-      return
-    }
+  async function onSubmit(values: OrderFormValues) {
+    const { customerName, phone, address, scheduledTime } = values;
     setSubmitting(true)
 
     try {
@@ -571,6 +734,9 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     return !isClaimed && !isSoldOut
   })
 
+  // 计算待领取的“新人奖励”券数量
+  const newcomerCouponsCount = centerCoupons.filter(c => c.is_newcomer_reward && c.status === 'active').length
+
   return (
     <div className="h-[100dvh] flex flex-col bg-slate-50 font-sans overflow-hidden">
       {/* 搜索栏与头部 */}
@@ -607,7 +773,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           >
             <div className="flex items-center gap-2.5">
               <div className="p-1.5 bg-white rounded-xl shadow-sm">
-                <Gift size={18} className="text-orange-500" />
+                <Gift size={18} className={cn("text-orange-500", claimableCoupons.length > 0 && "animate-gift-shake")} />
               </div>
               <div className="flex flex-col items-start">
                 <span className="text-sm text-orange-700 font-black flex items-center tracking-tight">
@@ -639,7 +805,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧分类 */}
         {!search && (
-          <div className="w-[84px] bg-slate-100/50 overflow-y-auto custom-scrollbar shrink-0 pb-32">
+          <div className="w-[84px] bg-slate-100/50 overflow-y-auto custom-scrollbar shrink-0" style={{ paddingBottom: `${bottomBarHeight}px` }}>
             {categories.map(cat => (
               <div 
                 key={cat.id} 
@@ -664,7 +830,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         )}
 
         {/* 右侧菜品 */}
-        <div className="flex-1 overflow-y-auto px-3 pb-32 scroll-smooth bg-white" style={{ paddingBottom: `${bottomBarHeight + 16}px` }}>
+        <div className="flex-1 overflow-y-auto px-3 scroll-smooth bg-white" style={{ paddingBottom: `${bottomBarHeight}px` }}>
           {categories.map(cat => {
             const itemsInCat = filteredItems.filter(i => i.category_id === cat.id)
             if (itemsInCat.length === 0) return null
@@ -676,16 +842,20 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 <div className="space-y-4">
                   {itemsInCat.map(item => (
                     <div key={item.id} className="flex gap-3 relative group">
-                      <div className="w-[88px] h-[88px] rounded-2xl bg-slate-100 shrink-0 overflow-hidden relative">
-                        {item.image_url ? (
-                          <div className="w-full h-full bg-center bg-cover transition-transform duration-500 group-active:scale-105" style={{ backgroundImage: `url(${item.image_url})` }} />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-slate-300">
-                            <span className="text-[10px] uppercase font-bold tracking-widest">No img</span>
-                          </div>
-                        )}
+                      <div className="relative shrink-0">
+                        <div className="w-[88px] h-[88px] rounded-2xl bg-slate-100 overflow-hidden relative ring-1 ring-slate-100/50">
+                          {item.image_url ? (
+                            <div className="w-full h-full bg-center bg-cover transition-transform duration-500 group-active:scale-105" style={{ backgroundImage: `url(${item.image_url})` }} />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-slate-300">
+                              <span className="text-[10px] uppercase font-bold tracking-widest">No img</span>
+                            </div>
+                          )}
+                        </div>
                         {item.is_new && (!item.new_until || new Date(item.new_until) > new Date()) && (
-                          <div className="absolute top-0 left-0 bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-br-lg rounded-tl-2xl">新品</div>
+                          <div className="absolute -top-1 -right-1 bg-gradient-to-r from-orange-500 to-amber-400 text-white p-1 rounded-lg shadow-lg shadow-orange-200/50 animate-pulse z-20">
+                            <Sparkles size={10} fill="currentColor" />
+                          </div>
                         )}
                       </div>
                       
@@ -716,7 +886,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                               </>
                             )}
                             <button 
-                              onClick={() => addToCart(item)}
+                              onClick={(e) => addToCart(item, e)}
                               className="size-6 rounded-full bg-orange-500 flex items-center justify-center text-white active:scale-90 transition-transform shadow-md shadow-orange-200"
                             >
                               <Plus size={14} strokeWidth={3} />
@@ -734,75 +904,62 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       </div>
 
       {/* 折扣明细栏（独立浮在购物车栏上方） */}
-      {totalCount > 0 && (vipLevel.rate < 1 || selectedCoupons.length > 0 || (availableCoupons.length > 0 && selectedCoupons.length === 0) || (customerPoints + Math.floor(totalAmount) < 100) || couponHint) && (
-        <div className="fixed bottom-[calc(72px+env(safe-area-inset-bottom,0px))] left-0 right-0 z-20 bg-[#1c1917] pt-3 px-4 pb-5 flex flex-col gap-1 border-t border-white/5 shadow-[0_-4px_12px_rgba(0,0,0,0.2)]">
-          {/* VIP 折扣行 */}
-          {vipLevel.rate < 1 && (
-            <div
-              onClick={() => setShowVipInfo(true)}
-              className="flex justify-between items-center text-xs cursor-pointer hover:opacity-80 transition-opacity"
-            >
-              <span className="text-emerald-400 font-medium">⭐ {vipLevel.label} {vipLevel.discount}</span>
-              <span className="text-emerald-400 font-bold">-¥{vipDiscountAmount.toFixed(2)}</span>
-            </div>
-          )}
-
-          {/* 优惠券行 */}
-          {selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0 && (
-            <div
-              onClick={() => setShowCouponPicker(true)}
-              className="flex justify-between items-center text-xs cursor-pointer hover:opacity-80 transition-opacity"
-            >
-              <span className="text-amber-400 font-medium">🎫 {selectedCoupons.map(c => c.coupon?.title).join(' + ') || '优惠券'}</span>
-              <span className="text-amber-400 font-bold">-¥{discountResult.couponDiscountAmount.toFixed(2)}</span>
-            </div>
-          )}
-
-          {/* 可用券提示 */}
-          {(() => {
-            if (availableCoupons.length === 0) return null;
-            if (selectedCoupons.length > 0) return null;
-            const trulyAvailableCount = availableCoupons.filter(uc => uc.coupon && getCouponEligibleAmount(uc.coupon, cart) >= uc.coupon.min_spend).length;
-            return (
-              <div
-                onClick={() => setShowCouponPicker(true)}
-                className="flex justify-between items-center text-xs cursor-pointer text-amber-500/80"
-              >
-                <span className={cn(trulyAvailableCount > 0 ? 'text-orange-400' : 'text-stone-500')}>
-                  🎫 {trulyAvailableCount > 0 ? `有 ${trulyAvailableCount} 张券可用` : '查看不可用券'}
-                </span>
-                <ChevronRight size={12} />
-              </div>
-            )
-          })()}
-
-          {/* 凑单提示 / 发券提示 */}
-          {couponHint && (
-            <div className={cn(
-              "text-[11px] text-center pt-0.5 font-bold",
-              couponHint.type === '达标' ? "text-emerald-400" : "text-orange-300"
-            )}>
-              {couponHint.type === '达标' ? '✅ ' : '🔥 '}{couponHint.text}
-            </div>
-          )}
-
-          {/* VIP 凑单提示 (优化版：更显眼的渐变背景与进度引导) */}
+      {/* 折扣明细栏（独立浮在购物车栏上方） */}
+      {totalCount > 0 && (vipLevel.rate < 1 || selectedCoupons.length > 0 || (availableCoupons.length > 0 && selectedCoupons.length === 0) || couponHint) && (
+        <div className="fixed bottom-[calc(66px+env(safe-area-inset-bottom,0px))] left-0 right-0 z-20 bg-slate-900/95 backdrop-blur-md pt-3.5 px-4 pb-4 flex flex-col gap-2.5 border-t border-white/10 shadow-[0_-4px_12px_rgba(0,0,0,0.4)]">
           {(() => {
             const currentTotalPts = customerPoints + Math.floor(totalAmount);
             const nextLevelInfo = getPointsToNextLevel(currentTotalPts);
-            if (!nextLevelInfo) return null;
-
+            
             return (
-              <div
-                onClick={() => setShowVipInfo(true)}
-                className="mt-1 py-2 px-3 bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-lg border border-orange-500/20 flex items-center justify-center gap-1.5 cursor-pointer animate-pulse"
-              >
-                <span className="text-xs">🔥</span>
-                <span className="text-[11px] text-orange-400 font-bold">
-                  再加 ¥{nextLevelInfo.needed.toFixed(0)} 可享 {nextLevelInfo.nextLevel.label} {nextLevelInfo.nextLevel.discount}
-                </span>
-                <ChevronRight size={10} className="text-orange-400" />
-              </div>
+              <>
+                {/* 会员优惠行 */}
+                {(vipLevel.rate < 1 || nextLevelInfo) && (
+                  <div
+                    onClick={() => setShowVipInfo(true)}
+                    className="flex justify-between items-center text-xs cursor-pointer active:opacity-60 transition-opacity"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-emerald-400 font-black shrink-0">⭐ {vipLevel.label} · {vipLevel.rate < 1 ? vipLevel.discount : '会员'}</span>
+                      {nextLevelInfo && (
+                        <span className="text-emerald-400/60 font-medium truncate text-[10px]">
+                          (再加 ¥{nextLevelInfo.needed.toFixed(0)}可享 {nextLevelInfo.nextLevel.label} {nextLevelInfo.nextLevel.discount})
+                        </span>
+                      )}
+                    </div>
+                    {vipLevel.rate < 1 && (
+                      <span className="text-emerald-400 font-black shrink-0 ml-2">-¥{vipDiscountAmount.toFixed(2)}</span>
+                    )}
+                  </div>
+                )}
+
+                {/* 优惠券行 */}
+                {selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0 && (
+                  <div
+                    onClick={() => setShowCouponPicker(true)}
+                    className="flex justify-between items-center text-xs cursor-pointer active:opacity-60 transition-opacity"
+                  >
+                    <span className="text-amber-400 font-bold truncate pr-4">🎫 {selectedCoupons.map(c => c.coupon?.title).join(' + ')}</span>
+                    <span className="text-amber-400 font-black shrink-0">-¥{discountResult.couponDiscountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {/* 凑单提示 / 发券提示 (只显示“差额”类提示，避免冗余) */}
+                {couponHint && couponHint.type !== '达标' && (
+                  <div 
+                    onClick={() => {
+                      if (couponHint.text.includes('满')) setShowCouponPicker(true)
+                    }}
+                    className={cn(
+                      "text-[11px] font-black flex items-center justify-center gap-1.5 py-1 rounded-lg border border-dashed transition-all active:scale-[0.98]",
+                      "text-amber-300 bg-amber-400/5 border-amber-400/20"
+                    )}
+                  >
+                    <Gift size={10} className="animate-gift-shake" />
+                    {couponHint.text}
+                  </div>
+                )}
+              </>
             )
           })()}
         </div>
@@ -822,7 +979,11 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         <div className="fixed bottom-0 left-0 right-0 bg-white shadow-[0_-8px_30px_rgba(0,0,0,0.08)] animate-in slide-in-from-bottom duration-300 z-50">
           <div className="flex items-center w-full px-4 py-3 pb-safe max-w-2xl mx-auto">
             <div
-              className="relative w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center -mt-8 border-[5px] border-slate-50 cursor-pointer shadow-lg z-10 transition-transform active:scale-95"
+              ref={bagRef}
+              className={cn(
+                "relative w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center -mt-8 border-[5px] border-slate-50 cursor-pointer shadow-lg z-10 transition-transform active:scale-95",
+                isBagShaking && "animate-shake-bounce"
+              )}
               onClick={() => setShowCart(true)}
             >
               <ShoppingBag size={22} className="text-white" />
@@ -850,10 +1011,15 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             </div>
             
             <button
-              className="bg-orange-500 text-white rounded-full px-6 py-2.5 text-sm font-black active:scale-95 transition-all shadow-md shadow-orange-200"
+              className="bg-orange-500 text-white rounded-full px-6 py-2.5 text-sm font-black active:scale-95 transition-all shadow-[0_8px_20px_-6px_rgba(234,88,12,0.3)]"
               onClick={() => {
-                setShowOrderForm(true)
-                if (phone.length === 11) loadCustomerBenefits(phone)
+                if (!customerId && newcomerCouponsCount > 0) {
+                  setShowCheckoutLoginPrompt(true)
+                } else {
+                  setShowOrderForm(true)
+                  setShowCart(false)
+                  if (formPhone?.length === 11) loadCustomerBenefits(formPhone)
+                }
               }}
             >
               去结算
@@ -903,7 +1069,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                         <Minus size={14} />
                       </button>
                       <span className="text-[14px] font-black w-4 text-center">{item.quantity}</span>
-                      <button onClick={() => addToCart(item.menuItem)} className="size-7 rounded-full bg-orange-500 flex items-center justify-center text-white active:scale-90 transition-transform shadow-md shadow-orange-200">
+                      <button onClick={() => addToCart(item.menuItem)} className="size-7 rounded-full bg-orange-500 flex items-center justify-center text-white active:scale-90 transition-transform shadow-[0_4px_12px_-2px_rgba(234,88,12,0.3)]">
                         <Plus size={14} strokeWidth={3} />
                       </button>
                     </div>
@@ -967,10 +1133,11 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       {showOrderForm && (
         <>
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity animate-in fade-in" onClick={() => setShowOrderForm(false)} />
-          <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col animate-in slide-in-from-bottom duration-300">
-            <header className="bg-white/80 backdrop-blur-md px-5 py-3 flex items-center justify-between border-b border-slate-100 shrink-0 sticky top-0 z-10">
-              <h3 className="font-black text-slate-900 text-lg">确认订单</h3>
-              <button onClick={() => setShowOrderForm(false)} className="p-2 -mr-2 bg-slate-100 rounded-full text-slate-500 active:scale-90 transition-transform">
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="fixed inset-0 z-50 bg-slate-50 flex flex-col animate-in slide-in-from-bottom duration-300">
+              <header className="bg-white/80 backdrop-blur-md px-5 py-3 flex items-center justify-between border-b border-slate-100 shrink-0 sticky top-0 z-10">
+                <h3 className="font-black text-slate-900 text-lg">确认订单</h3>
+                <button type="button" onClick={() => setShowOrderForm(false)} className="p-2 -mr-2 bg-slate-100 rounded-full text-slate-500 active:scale-90 transition-transform">
                 <X size={20} />
               </button>
             </header>
@@ -1000,72 +1167,176 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
               {/* 信息表单 */}
               <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-5 space-y-4">
-                <div>
-                  <label className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
-                    <User size={14} className="text-orange-500" /> 您的称呼
-                  </label>
-                  <input 
-                    className={cn(
-                      "w-full bg-slate-50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all",
-                      formError && !customerName && "border-rose-500 bg-rose-50 placeholder:text-rose-300 animate-shake"
-                    )}
-                    placeholder="怎么称呼您？" 
-                    value={customerName} 
-                    onChange={e => setCustomerName(e.target.value)} 
-                  />
-                </div>
-                <div>
-                  <label className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
-                    <Phone size={14} className="text-orange-500" /> 联系手机
-                  </label>
-                  <input 
-                    className={cn(
-                      "w-full bg-slate-50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all",
-                      (formError && !phone) || (phone.length > 0 && !isValidPhone(phone)) ? "border-rose-500 bg-rose-50 animate-shake" : ""
-                    )}
-                    type="tel" 
-                    placeholder="重要：配送员将联系此号码" 
-                    value={phone} 
-                    onChange={e => {
-                      const v = e.target.value.replace(/\D/g, '').slice(0, 11)
-                      setPhone(v)
-                      if (v.length === 11) loadCustomerBenefits(v)
-                    }} 
-                    maxLength={11} 
-                  />
-                  {phone.length > 0 && !isValidPhone(phone) && (
-                    <p className="text-[11px] font-bold text-rose-500 mt-1.5 ml-1">请输入有效的手机号（1开头，11位数字）</p>
+                <FormField
+                  control={form.control}
+                  name="customerName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
+                        <User size={14} className="text-orange-500" /> 您的称呼
+                      </FormLabel>
+                      <FormControl>
+                        <Input 
+                          placeholder="怎么称呼您？" 
+                          {...field}
+                          className="w-full h-11 bg-slate-50 border-transparent focus-visible:bg-white focus-visible:border-orange-500 focus-visible:ring-4 focus-visible:ring-orange-500/10 rounded-2xl px-4 text-sm transition-all"
+                        />
+                      </FormControl>
+                      <FormMessage className="ml-1 text-[11px] font-bold pt-1" />
+                    </FormItem>
                   )}
-                </div>
-                <div>
-                  <label className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
-                    <Clock size={14} className="text-orange-500" /> 预定时间
-                  </label>
-                  <input 
-                    className={cn(
-                      "w-full bg-slate-50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all",
-                      formError && !scheduledTime && "border-rose-500 bg-rose-50 animate-shake"
-                    )}
-                    type="datetime-local" 
-                    value={scheduledTime} 
-                    onChange={e => setScheduledTime(e.target.value)} 
-                  />
-                </div>
-                <div>
-                  <label className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
-                    <MapPin size={14} className="text-orange-500" /> 详细地址
-                  </label>
-                  <textarea 
-                    className={cn(
-                      "w-full bg-slate-50 border-transparent focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all resize-none",
-                      formError && !address && "border-rose-500 bg-rose-50 placeholder:text-rose-300 animate-shake"
-                    )}
-                    placeholder="请输入您的详细配送地址..." 
-                    rows={2} 
-                    value={address} 
-                    onChange={e => setAddress(e.target.value)} 
-                  />
-                </div>
+                />
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
+                        <Phone size={14} className="text-orange-500" /> 联系手机
+                      </FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="tel" 
+                          placeholder="重要：配送员将联系此号码" 
+                          maxLength={11}
+                          {...field}
+                          onChange={(e) => {
+                            const v = e.target.value.replace(/\D/g, '').slice(0, 11)
+                            field.onChange(v)
+                          }}
+                          className="w-full h-11 bg-slate-50 border-transparent focus-visible:bg-white focus-visible:border-orange-500 focus-visible:ring-4 focus-visible:ring-orange-500/10 rounded-2xl px-4 text-sm transition-all"
+                        />
+                      </FormControl>
+                      <FormMessage className="ml-1 text-[11px] font-bold pt-1" />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="scheduledTime"
+                  render={({ field }) => {
+                    const dateObj = field.value ? new Date(field.value) : undefined;
+                    const openTime = merchant?.business_hours?.open_time || '09:00';
+                    const closeTime = merchant?.business_hours?.close_time || '22:00';
+
+                    // 计算建议的默认时间（用于显示，不修改表单值）
+                    const getSensibleDefaultTime = () => {
+                      const now = new Date()
+                      const futureBuffer = new Date(now.getTime() + 30 * 60000)
+                      const fh = futureBuffer.getHours()
+                      const fm = futureBuffer.getMinutes()
+                      const nowTimeStr = `${fh.toString().padStart(2, '0')}:${fm.toString().padStart(2, '0')}`
+                      
+                      if (nowTimeStr < openTime) return openTime
+                      if (nowTimeStr > closeTime) return openTime 
+                      return nowTimeStr
+                    }
+
+                    const timeStr = dateObj ? format(dateObj, "HH:mm") : getSensibleDefaultTime();
+
+                    // 校验时间是否合法（今天不可在过去，且必须在营业时间内）
+                    const validateAndSet = (d: Date, t: string) => {
+                      const [hh, mm] = t.split(':')
+                      const finalDate = new Date(d)
+                      finalDate.setHours(parseInt(hh), parseInt(mm), 0, 0)
+
+                      // 1. 营业时间校验
+                      if (t < openTime || t > closeTime) {
+                        toast(`不在营业时间内 (配送时间为 ${openTime} - ${closeTime})`, 'warning')
+                        return
+                      }
+
+                      // 2. 过去时间校验 (如果是今天)
+                      const now = new Date()
+                      const buffer = new Date(now.getTime() + 15 * 60000) // 15分钟冗余
+                      if (finalDate < buffer) {
+                        toast('预定时间无效 (必须晚于当前时间)', 'warning')
+                        return
+                      }
+
+                      field.onChange(format(finalDate, "yyyy-MM-dd'T'HH:mm"))
+                    }
+
+                    const setDate = (d: Date | undefined) => {
+                      if (!d) return
+                      validateAndSet(d, timeStr)
+                    }
+
+                    const setTime = (t: string) => {
+                      const baseDate = dateObj || new Date()
+                      validateAndSet(baseDate, t)
+                    }
+
+                    return (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
+                        <Clock size={14} className="text-orange-500" /> 配送预定时间
+                      </FormLabel>
+                      <FormControl>
+                        <div className="grid grid-cols-2 gap-3">
+                          {/* 1. 日期选择器 */}
+                          <Popover>
+                            <PopoverTrigger 
+                              className={cn(
+                                buttonVariants({ variant: "outline" }),
+                                "w-full h-12 justify-start text-left font-bold rounded-2xl border-transparent bg-slate-50 transition-all hover:bg-slate-100 text-[14px] focus-visible:ring-4 focus-visible:ring-orange-500/10 focus-visible:border-orange-500 shadow-sm px-3",
+                                !field.value && "text-slate-400"
+                              )}
+                            >
+                              <CalendarIcon className="mr-1.5 h-3.5 w-3.5 text-orange-500 shrink-0" />
+                              <span className="text-[13px]">{dateObj ? format(dateObj, "M月d日 E", { locale: zhCN }) : "选择日期"}</span>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 rounded-2xl border-none shadow-2xl z-[100]" align="start">
+                              <Calendar
+                                mode="single"
+                                locale={zhCN}
+                                disabled={(date) => {
+                                  // 禁用今天之前的日期
+                                  const todayMidnight = new Date()
+                                  todayMidnight.setHours(0, 0, 0, 0)
+                                  const dStr = format(date, "yyyy-MM-dd")
+                                  return date < todayMidnight || disabledDates.some(dd => dd.disabled_date === dStr)
+                                }}
+                                selected={dateObj}
+                                onSelect={setDate}
+                              />
+                            </PopoverContent>
+                          </Popover>
+
+                          {/* 2. 时间选择器 */}
+                          <TimePicker 
+                            value={timeStr} 
+                            onChange={setTime} 
+                            isTimeDisabled={(t) => t < openTime || t > closeTime}
+                            onDisabledSelect={() => toast(`不可选择非营业时间 (${openTime} - ${closeTime})`, 'warning')}
+                            className="w-full h-12 bg-slate-50 border-transparent text-[14px] rounded-2xl shadow-sm hover:bg-slate-100" 
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage className="ml-1 text-[11px] font-bold pt-1" />
+                    </FormItem>
+                  )}}
+                />
+                <FormField
+                  control={form.control}
+                  name="address"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1.5 text-[13px] font-black text-slate-700 mb-2">
+                        <MapPin size={14} className="text-orange-500" /> 详细地址
+                      </FormLabel>
+                      <FormControl>
+                        <Textarea 
+                          placeholder="请输入您的详细配送地址..." 
+                          rows={2} 
+                          {...field}
+                          className="w-full bg-slate-50 border-transparent focus-visible:bg-white focus-visible:border-orange-500 focus-visible:ring-4 focus-visible:ring-orange-500/10 rounded-2xl px-4 py-3 text-sm transition-all resize-none"
+                        />
+                      </FormControl>
+                      <FormMessage className="ml-1 text-[11px] font-bold pt-1" />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               {/* VIP 等级权益入口 */}
@@ -1155,7 +1426,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 >
                   <div className="flex items-center gap-2.5">
                     <div className="p-1.5 bg-amber-50 rounded-xl">
-                      <Gift size={18} className="text-amber-500" />
+                      <Gift size={20} className="text-[#ea580c] mb-[-2px] animate-gift-shake" />
                     </div>
                     <span className="font-black text-slate-800 text-sm">优惠券</span>
                     {selectedCoupons.length > 0 ? (
@@ -1183,14 +1454,15 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
             <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-4 pb-safe z-20">
               <button 
-                className="w-full bg-slate-900 text-white rounded-full h-[52px] text-[15px] font-black flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 disabled:scale-100 shadow-xl shadow-slate-200"
-                onClick={handleSubmitOrder}
+                type="submit"
+                className="w-full bg-slate-900 text-white rounded-full h-[52px] text-[15px] font-black flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-70 disabled:scale-100 shadow-[0_12px_24px_-8px_rgba(15,23,42,0.25)]"
                 disabled={submitting}
               >
                 {submitting ? <span className="spinner border-white border-t-transparent" /> : <>确认并模拟支付 <ArrowRight size={18} /></>}
               </button>
             </div>
-          </div>
+            </form>
+          </Form>
         </>
       )}
 
@@ -1200,7 +1472,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       {/* 未登录用户悬浮登录拉引刕 */}
       {showLoginBanner && (
         <div
-          onClick={() => router.push(`/login?redirect=/m/${merchantId}`)}
+          onClick={() => { setShowLoginBanner(false); setShowLoginModal(true) }}
           style={{
             position: 'fixed', bottom: totalCount > 0 ? '80px' : '20px', left: '50%',
             transform: 'translateX(-50%)', zIndex: 60,
@@ -1212,8 +1484,8 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             animation: 'slideUp 0.4s ease',
           }}
         >
-          <Gift size={18} color="white" />
-          <span style={{ color: 'white', fontWeight: '700', fontSize: '14px' }}>登录即领 5 元立减券</span>
+          <Gift size={18} color="white" className="animate-gift-shake" />
+          <span style={{ color: 'white', fontWeight: '700', fontSize: '14px' }}>登录即领 {welcomeCouponAmount} 元立减券</span>
           <button
             onClick={(e) => { e.stopPropagation(); setShowLoginBanner(false) }}
             style={{ background: 'rgba(255,255,255,0.3)', border: 'none', borderRadius: '50%', width: 20, height: 20, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
@@ -1222,6 +1494,93 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           </button>
         </div>
       )}
+
+      {/* 结算前的登录引导弹窗 */}
+      <Dialog open={showCheckoutLoginPrompt} onOpenChange={setShowCheckoutLoginPrompt}>
+        <DialogContent className="w-[85vw] max-w-sm rounded-[2rem] p-6 bg-white border-none shadow-2xl overflow-hidden pointer-events-auto z-[300]">
+          <div className="text-center pt-3 pb-5">
+            <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-[0_10px_25px_-5px_rgba(234,88,12,0.3)]">
+              <Gift size={32} color="white" className="animate-gift-shake" />
+            </div>
+            <DialogTitle className="text-xl font-black text-slate-800 tracking-tight">
+              🎁 还有礼券待领取
+            </DialogTitle>
+            <DialogDescription className="text-slate-500 text-[13px] font-bold mt-2">
+              您有 <span className="text-orange-500 font-black">{newcomerCouponsCount}</span> 张新人礼券待领取<br/>领券登录后本单 <span className="text-orange-500 font-black">最高立减 ¥{welcomeCouponAmount}</span>
+            </DialogDescription>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <button
+              onClick={() => {
+                setShowCheckoutLoginPrompt(false)
+                setShowLoginModal(true)
+              }}
+              className="w-full h-12 bg-gradient-to-r from-orange-500 to-rose-500 text-white font-black text-[15px] rounded-2xl active:scale-95 transition-all shadow-[0_6px_16px_-4px_rgba(234,88,12,0.4)] flex items-center justify-center gap-2"
+            >
+              去领券并登录
+            </button>
+            <button
+              onClick={() => {
+                setShowCheckoutLoginPrompt(false)
+                setShowOrderForm(true)
+                setShowCart(false)
+              }}
+              className="w-full h-12 bg-white text-slate-500 font-bold text-[13px] rounded-2xl hover:bg-slate-50 active:scale-95 transition-all"
+            >
+              暂不领券，直接下单
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ============== 客户端沉浸式登录模态弹窗 ============== */}
+      <Dialog open={showLoginModal} onOpenChange={setShowLoginModal}>
+        <DialogContent className="w-[85vw] max-w-sm rounded-[2rem] p-6 bg-white border-none shadow-2xl overflow-hidden pointer-events-auto z-[200]">
+          <div className="text-center pt-3 pb-5">
+            <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-[0_8px_20px_-4px_rgba(234,88,12,0.25)]">
+              <Gift size={32} color="white" className="animate-gift-shake" />
+            </div>
+            <DialogTitle className="text-xl font-black text-slate-800 tracking-tight">领取新人专属礼券</DialogTitle>
+            <DialogDescription className="text-slate-500 text-[13px] font-bold mt-2">
+              快速登录领取 <span className="text-orange-500 font-black">{welcomeCouponAmount} 元立减券</span><br/>下单时可直接使用
+            </DialogDescription>
+          </div>
+
+          <form onSubmit={handleClientLogin} className="space-y-5">
+            <div className="space-y-2">
+              <label className="flex items-center gap-1.5 text-[12px] font-black tracking-widest uppercase text-slate-400 ml-1">
+                <Phone size={12} className="text-orange-400" /> 手机号
+              </label>
+              <Input
+                type="tel"
+                placeholder="请输入您的手机号"
+                value={loginPhone}
+                onChange={(e) => setLoginPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                required
+                maxLength={11}
+                className="h-14 font-black text-base bg-orange-50/50 border-orange-100 rounded-2xl px-5 placeholder:font-bold focus-visible:ring-4 focus-visible:ring-orange-500/20 focus-visible:border-orange-400 transition-all text-slate-800"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full h-14 bg-gradient-to-r from-orange-500 to-rose-500 text-white font-black text-base rounded-2xl active:scale-95 transition-all shadow-[0_8px_16px_-4px_rgba(234,88,12,0.4)] flex items-center justify-center -mb-2 hover:opacity-95 tracking-tight gap-2 disabled:opacity-50 disabled:shadow-none"
+            >
+              {loginLoading ? (
+                <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>确认领券查收 <Gift size={20} className="animate-gift-shake" /></>
+              )}
+            </button>
+          </form>
+
+          <p className="text-center text-[10px] font-black uppercase tracking-wider text-slate-300 mt-6 pb-1">
+            我们承诺不泄露隐私，仅用于权益发放
+          </p>
+        </DialogContent>
+      </Dialog>
 
       {/* VIP 等级详情幕 */}
       {showVipInfo && (
@@ -1617,6 +1976,81 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           </div>
         </div>
       )}
+
+      {/* 抛物线小球 */}
+      {balls.map(ball => (
+        <div 
+          key={ball.id} 
+          className="fly-ball-container"
+          style={{
+            '--start-x': `${ball.startX}px`,
+            '--start-y': `${ball.startY}px`,
+            '--end-y': `${ball.endY}px`
+          } as React.CSSProperties}
+        >
+          <div className="fly-ball-inner" />
+        </div>
+      ))}
+
+      {/* 注入 CSS 动画 */}
+      <style jsx global>{`
+        .fly-ball-container {
+          position: fixed;
+          left: 0;
+          top: 0;
+          z-index: 9999;
+          pointer-events: none;
+          animation: flyX 0.6s linear forwards;
+        }
+        .fly-ball-inner {
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: #f97316;
+          box-shadow: 0 0 10px rgba(249, 115, 22, 0.4);
+          animation: flyY 0.6s cubic-bezier(0.3, -0.4, 0.4, 0) forwards;
+        }
+        
+        @keyframes flyX {
+          from { transform: translateX(var(--start-x)); }
+          to { transform: translateX(var(--end-x)); }
+        }
+        @keyframes flyY {
+          from { transform: translateY(var(--start-y)); }
+          to { transform: translateY(var(--end-y)); }
+        }
+
+        .animate-shake-bounce {
+          animation: shake-bounce 0.4s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake-bounce {
+          0%, 100% { transform: scale(1) translateY(0); }
+          20% { transform: scale(1.15) translateY(-8px); }
+          40% { transform: scale(0.9) translateY(0); }
+          60% { transform: scale(1.05) translateY(-3px); }
+          80% { transform: scale(0.98) translateY(0); }
+        }
+
+        .animate-gift-shake {
+          animation: gift-shake 2s infinite ease-in-out;
+          transform-origin: center bottom;
+        }
+
+        @keyframes gift-shake {
+          0%, 100% { transform: rotate(0) scale(1); }
+          10%, 30%, 50%, 70% { transform: rotate(-8deg) scale(1.1); }
+          20%, 40%, 60%, 80% { transform: rotate(8deg) scale(1.1); }
+          90% { transform: rotate(0) scale(1); }
+        }
+
+        .fadeIn { animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes popIn { 
+          from { transform: scale(0.8); opacity: 0; } 
+          to { transform: scale(1); opacity: 1; } 
+        }
+      `}</style>
     </div>
   )
 }

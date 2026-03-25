@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS coupons (
   title       TEXT NOT NULL,             -- 优惠券名称，如"新人立减 5 元"
   amount      DECIMAL(10,2) NOT NULL,    -- 减免金额（元）
   min_spend   DECIMAL(10,2) DEFAULT 0,   -- 使用门槛（0 = 无门槛）
-  is_global   BOOLEAN DEFAULT false,     -- true = 全部用户可领，false = 指定用户发放
+  is_newcomer_reward   BOOLEAN DEFAULT false,     -- true = 全部用户可领，false = 指定用户发放
   expiry_days INTEGER DEFAULT 7,         -- 领取后有效天数
   status      TEXT DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   created_at  TIMESTAMPTZ DEFAULT now()

@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
+import { Label } from "@/components/ui/label"
 import { useToast } from '@/components/common/Toast'
 import { cn } from '@/lib/utils'
 import { useForm, useWatch } from "react-hook-form"
@@ -32,16 +33,25 @@ import {
 
 const couponSchema = z.object({
   title: z.string().min(1, "请输入卡券名称"),
-  amount: z.union([z.number().positive("面额必须大于0"), z.literal("")]).refine(val => val !== "", "请输入抵扣面额"),
-  min_spend: z.union([z.number().min(0, "门槛不能为负数"), z.literal("")]).refine(val => val !== "", "请输入消费门槛"),
-  expiry_days: z.union([z.number().min(1, "有效期至少1天"), z.literal("")]).refine(val => val !== "", "请输入有效期"),
-  is_global: z.boolean().default(false),
+  amount: z.any()
+    .refine((v) => v !== '' && v != null && v !== undefined, "请输入抵扣面额")
+    .refine((v) => !isNaN(Number(v)) && Number(v) > 0, "面额必须大于0"),
+  min_spend: z.any()
+    .refine((v) => v !== '' && v != null && v !== undefined, "请输入消费门槛")
+    .refine((v) => !isNaN(Number(v)) && Number(v) >= 0, "门槛不能为负数"),
+  expiry_days: z.any()
+    .refine((v) => v !== '' && v != null && v !== undefined, "请输入有效期天数")
+    .refine((v) => !isNaN(Number(v)) && Number(v) >= 1, "有效期至少1天"),
+  is_newcomer_reward: z.boolean().default(false),
   target_type: z.enum(['all', 'category', 'customer']),
   target_category_id: z.string().nullable().optional(),
   target_customer_ids: z.array(z.string()).default([]),
   target_item_ids: z.array(z.string()).default([]),
   stackable: z.boolean().default(false),
-  total_quantity: z.number().nullable().optional(),
+  total_quantity: z.union([z.number(), z.string(), z.undefined()])
+    .refine((v) => v == null || v === '' || v === undefined || Number(v) >= 1, "发行量至少为1张")
+    .optional(),
+  is_unlimited: z.boolean().default(false),
 }).refine((data) => {
   if (data.target_type === 'category') {
     return data.target_item_ids.length > 0;
@@ -81,13 +91,14 @@ export default function CouponsPage() {
       amount: '' as unknown as number,
       min_spend: '' as unknown as number,
       expiry_days: 7 as unknown as number,
-      is_global: false,
+      is_newcomer_reward: false,
       target_type: 'all',
       target_category_id: null,
       target_customer_ids: [],
       target_item_ids: [],
       stackable: false,
-      total_quantity: null,
+      total_quantity: 100,
+      is_unlimited: false,
     },
   })
 
@@ -111,6 +122,7 @@ export default function CouponsPage() {
   const targetType = useWatch({ control, name: 'target_type' })
   const targetItemIds = useWatch({ control, name: 'target_item_ids' }) || []
   const targetCustomerIds = useWatch({ control, name: 'target_customer_ids' }) || []
+  const isUnlimited = useWatch({ control, name: 'is_unlimited' })
 
   const { toast } = useToast()
 
@@ -165,7 +177,7 @@ export default function CouponsPage() {
   }, [loadData])
 
   const onInvalid = () => {
-    toast('请填写完整表单信息', 'warning')
+    toast('请填写表单信息', 'warning')
   }
 
   async function onSubmit(values: CouponFormValues) {
@@ -182,12 +194,20 @@ export default function CouponsPage() {
       amount: Number(values.amount),
       min_spend: Number(values.min_spend),
       expiry_days: Number(values.expiry_days),
-      is_global: values.is_global,
+      is_newcomer_reward: values.is_newcomer_reward,
       target_type: values.target_type,
       stackable: values.stackable,
       status: 'active',
     }
-    if (values.total_quantity !== null && values.total_quantity !== undefined) insertData.total_quantity = values.total_quantity
+
+    if (values.is_unlimited) {
+      insertData.total_quantity = null
+    } else if (values.total_quantity !== undefined) {
+      insertData.total_quantity = values.total_quantity
+    } else {
+      toast('请指定发行量或开启不限量', 'warning')
+      return 
+    }
     if (values.target_type === 'category') {
       if (values.target_item_ids.length > 0) insertData.target_item_ids = values.target_item_ids
     }
@@ -297,7 +317,7 @@ export default function CouponsPage() {
         <Button 
           size="sm" 
           onClick={() => {
-            reset({ title: '', amount: '' as unknown as number, min_spend: '' as unknown as number, expiry_days: 7 as unknown as number, is_global: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: null });
+            reset({ title: '', amount: undefined, min_spend: undefined, expiry_days: 7, is_newcomer_reward: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: 100, is_unlimited: false });
             setShowForm(true);
           }}
           className="rounded-full bg-slate-900 hover:bg-slate-800 text-white font-black text-xs px-4"
@@ -323,7 +343,7 @@ export default function CouponsPage() {
             </div>
             <Button 
               onClick={() => {
-                reset({ title: '', amount: '' as unknown as number, min_spend: '' as unknown as number, expiry_days: 7 as unknown as number, is_global: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: null });
+                reset({ title: '', amount: undefined, min_spend: undefined, expiry_days: 7, is_newcomer_reward: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: 100, is_unlimited: false });
                 setShowForm(true);
               }}
               className="h-14 px-10 rounded-2xl bg-orange-600 hover:bg-orange-500 text-white font-black text-[15px] shadow-xl shadow-orange-100 transition-all active:scale-95 flex gap-2"
@@ -352,13 +372,14 @@ export default function CouponsPage() {
                       amount: c.amount,
                       min_spend: c.min_spend,
                       expiry_days: c.expiry_days,
-                      is_global: c.is_global,
+                      is_newcomer_reward: c.is_newcomer_reward,
                       target_type: c.target_type,
                       target_category_id: c.target_category_id,
                       target_customer_ids: c.target_customer_ids || [],
                       target_item_ids: c.target_item_ids || [],
                       stackable: c.stackable,
-                      total_quantity: c.total_quantity
+                      total_quantity: c.total_quantity ?? 100,
+                      is_unlimited: c.total_quantity === null
                     });
 
                     // 自动展开已选中的菜品分类树
@@ -436,7 +457,7 @@ export default function CouponsPage() {
                           <Badge className="bg-slate-50 text-slate-500 font-black text-[9px] h-5 py-0 border-none rounded-full flex gap-1 uppercase tracking-tighter">
                             <Clock size={10} strokeWidth={3} /> {c.expiry_days}天有效期
                           </Badge>
-                          {c.is_global && (
+                          {c.is_newcomer_reward && (
                             <Badge className="bg-blue-50 text-blue-600 font-black text-[9px] h-5 py-0 border-none rounded-full uppercase tracking-tighter">新客专享</Badge>
                           )}
                           {c.target_type === 'category' && (
@@ -489,7 +510,7 @@ export default function CouponsPage() {
           </div>
 
           <Form {...form}>
-            <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="relative flex flex-col max-h-[85vh]">
+            <form onSubmit={handleSubmit(onSubmit as Parameters<typeof handleSubmit>[0], onInvalid)} className="relative flex flex-col max-h-[85vh]">
               <div className="flex-1 w-full overflow-y-auto overscroll-contain custom-scrollbar">
                 <fieldset disabled={!!viewingCoupon} className={cn("p-5 space-y-5 pb-28 border-none m-0", viewingCoupon && "opacity-90")}>
                   <div className="space-y-6">
@@ -569,51 +590,69 @@ export default function CouponsPage() {
                         <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider">周期与额度</span>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
-                      <FormField
-                        control={form.control}
-                        name="expiry_days"
-                        render={({ field }) => (
-                          <FormItem className="space-y-1.5">
-                            <FormLabel className="text-[10px] font-black text-slate-500 uppercase tracking-tighter ml-1 flex items-center gap-1">
-                              <Calendar size={10} /> 有效期 (天)
-                            </FormLabel>
-                            <FormControl>
-                              <Input 
-                                type="number" 
-                                pattern="[0-9]*"
-                                inputMode="numeric"
-                                className="h-11 rounded-xl font-bold border-slate-100 placeholder:text-sm" 
-                                {...field}
-                                onChange={e => field.onChange(e.target.value === '' ? '' : Number(e.target.value))}
-                              />
-                            </FormControl>
-                            <FormMessage className="text-[10px] ml-1" />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="total_quantity"
-                        render={({ field }) => (
-                          <FormItem className="space-y-1.5">
-                            <FormLabel className="text-[10px] font-black text-slate-500 uppercase tracking-tighter ml-1 flex items-center gap-1">
+                        <FormField
+                          control={form.control}
+                          name="expiry_days"
+                          render={({ field }) => (
+                            <FormItem className="space-y-1.5">
+                              <FormLabel className="text-[10px] font-black text-slate-500 uppercase tracking-tighter ml-1 flex items-center gap-1">
+                                <Calendar size={10} /> 有效期 (天)
+                              </FormLabel>
+                              <FormControl>
+                                <Input 
+                                  type="number" 
+                                  className="h-11 rounded-xl font-bold border-slate-100" 
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage className="text-[10px] ml-1" />
+                            </FormItem>
+                          )}
+                        />
+                        <div className="space-y-1.5 flex-1 flex flex-col">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <Label className="text-[10px] font-black text-slate-500 uppercase tracking-tighter ml-1 flex items-center gap-1">
                               <Ticket size={10} /> 总发行量
-                            </FormLabel>
-                            <FormControl>
-                              <Input 
-                                type="number" 
-                                pattern="[0-9]*"
-                                inputMode="numeric"
-                                placeholder="∞ 不限量"
-                                className="h-11 rounded-xl font-medium border-slate-100 placeholder:text-sm placeholder:font-normal placeholder:text-slate-400" 
-                                value={field.value ?? ''}
-                                onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
-                              />
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-                    </div>
+                            </Label>
+                            <FormField
+                              control={form.control}
+                              name="is_unlimited"
+                              render={({ field }) => (
+                                <div className="flex items-center gap-2 pr-1">
+                                  <span className="text-[10px] font-black text-slate-400">不限量</span>
+                                  <Switch 
+                                    checked={field.value}
+                                    onCheckedChange={field.onChange}
+                                    className="scale-75 data-[state=checked]:bg-orange-500"
+                                  />
+                                </div>
+                              )}
+                            />
+                          </div>
+                          <FormField
+                            control={form.control}
+                            name="total_quantity"
+                            render={({ field }) => (
+                              <FormItem className="space-y-0">
+                                <FormControl>
+                                  <Input 
+                                    type="number" 
+                                    placeholder={isUnlimited ? "∞ 不限量发放" : "份数"}
+                                    disabled={isUnlimited}
+                                    className={cn(
+                                      "h-11 rounded-xl font-bold border-slate-100 placeholder:text-sm transition-all",
+                                      isUnlimited && "bg-slate-50 text-slate-300 italic font-medium opacity-50"
+                                    )}
+                                    {...field}
+                                    value={field.value ?? ''}
+                                  />
+                                </FormControl>
+                                <FormMessage className="text-[10px] ml-1 mt-1" />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </div>
                   </div>
 
                     <div className="flex flex-col gap-3">
@@ -623,7 +662,7 @@ export default function CouponsPage() {
                       </div>
                       <FormField
                         control={control}
-                        name="is_global"
+                        name="is_newcomer_reward"
                         render={({ field }) => (
                           <FormItem className="flex items-center justify-between p-4 rounded-2xl bg-white border border-slate-100 shadow-sm transition-all active:scale-[0.98] group hover:border-blue-200">
                             <div className="flex items-center gap-4">
