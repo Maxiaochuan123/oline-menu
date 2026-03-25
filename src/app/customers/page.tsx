@@ -215,7 +215,7 @@ export default function CustomersPage() {
                         {fetchingOrders && orders.length === 0 ? (
                            <div className="py-8 flex justify-center"><div className="spinner border-orange-200" /></div>
                         ) : orders.length === 0 ? (
-                           <div className="py-8 text-center text-xs text-slate-400 font-medium italic">暂无订单记录</div>
+                           <div className="py-8 text-center text-xs text-slate-400 font-medium">暂无订单记录</div>
                         ) : (
                           <div className="space-y-2">
                             {orders.map(order => (

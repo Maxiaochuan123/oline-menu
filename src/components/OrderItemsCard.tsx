@@ -1,6 +1,7 @@
 'use client'
 
 import { formatPrice, cn } from '@/lib/utils'
+import { Gift, Crown } from 'lucide-react'
 
 export interface OrderItemData {
   id: string
@@ -32,6 +33,10 @@ interface Props {
   usedCoupons: UsedCoupon[]
   /** 订单优惠券总抵扣金额 */
   couponDiscountAmount: number
+  /** 会员折扣金额 */
+  vipDiscountAmount?: number
+  /** 订单商品原价总计（可选，传了则显示商品小计） */
+  originalAmount?: number
   /** 订单实付总金额 */
   totalAmount: number
   /** 下单时间 */
@@ -63,6 +68,8 @@ export default function OrderItemsCard({
   showRemark = false,
   usedCoupons,
   couponDiscountAmount,
+  vipDiscountAmount = 0,
+  originalAmount,
   totalAmount,
   createdAt,
   refundAmount,
@@ -112,24 +119,29 @@ export default function OrderItemsCard({
         ))}
       </div>
 
-      {/* 优惠券明细 */}
-      {usedCoupons.length > 0 && couponDiscountAmount > 0 && (
-        <div className="pt-3 border-t border-dashed border-blue-100 space-y-2">
-          {usedCoupons.map((coupon) => (
-            <div
-              key={coupon.id}
-              className="flex justify-between items-center text-[13px] text-blue-600 font-medium bg-blue-50/50 px-2 py-1.5 rounded-lg border border-blue-100/50"
-            >
-              <span className="flex items-center gap-1.5">
-                <span className="text-xs">🏷️</span> {coupon.title}
-              </span>
-              <span className="font-black tabular-nums">-{formatPrice(coupon.amount)}</span>
+      {/* 优惠明细（对齐下单预览页标准样式） */}
+      {(usedCoupons.length > 0 || vipDiscountAmount > 0 || originalAmount !== undefined) && (
+        <div className="space-y-2 mt-4 bg-slate-50 rounded-2xl p-3 border border-slate-100/50 transition-all">
+          {originalAmount !== undefined && (
+            <div className="flex justify-between items-center text-[13px] border-b border-slate-100/60 pb-2 mb-1">
+              <span className="text-slate-500 font-bold">商品明细小计</span>
+              <span className="text-slate-600 font-bold tabular-nums">{formatPrice(originalAmount)}</span>
             </div>
-          ))}
-          {usedCoupons.length > 1 && (
-            <div className="flex justify-between items-center pt-2 px-2 text-[11px] text-blue-500 font-bold">
-              <span>共优惠</span>
-              <span className="tabular-nums">-{formatPrice(couponDiscountAmount)}</span>
+          )}
+          {vipDiscountAmount > 0 && (
+            <div className="flex justify-between items-center text-[13px]">
+              <span className="text-emerald-600 font-bold flex items-center gap-1.5">
+                <Crown size={12} fill="currentColor" /> 会员级别折扣
+              </span>
+              <span className="text-emerald-600 font-black">-{formatPrice(vipDiscountAmount)}</span>
+            </div>
+          )}
+          {usedCoupons.length > 0 && couponDiscountAmount > 0 && (
+            <div className="flex justify-between items-center text-[13px]">
+              <span className="text-amber-500 font-bold flex items-center gap-1.5">
+                <Gift size={12} /> 优惠券抵扣
+              </span>
+              <span className="text-amber-500 font-black">-{formatPrice(couponDiscountAmount)}</span>
             </div>
           )}
         </div>
@@ -138,7 +150,7 @@ export default function OrderItemsCard({
       {/* 实付合计 */}
       <div className="pt-4 border-t border-dashed border-slate-200">
         <div className="flex justify-between items-end">
-          <span className="text-sm font-bold text-slate-500 pb-0.5">实付合计</span>
+          <span className="text-sm font-black text-slate-800 pb-0.5">应付合计</span>
           <span className={cn(
             "font-black tracking-tighter tabular-nums",
             titleAsHeading ? "text-2xl" : "text-xl",
@@ -183,7 +195,7 @@ export default function OrderItemsCard({
       )}
 
       {/* 下单时间 */}
-      <div className="text-[10px] text-slate-400 font-bold text-right pt-2 italic">
+      <div className="text-[10px] text-slate-400 font-medium text-right pt-2 tracking-wider">
         下单时间 · {new Date(createdAt).toLocaleString('zh-CN', { hour12: false })}
       </div>
     </div>

@@ -4,10 +4,10 @@ import { useState, useEffect, use, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Order, Merchant, OrderItem, Message } from '@/lib/types'
-import { formatPrice, getCountdown, cn } from '@/lib/utils'
+import { formatPrice, cn } from '@/lib/utils'
 import { calculateCancellationPenalty } from '@/lib/order'
 import { 
-  CheckCircle2, Clock, AlertCircle, X,
+  CheckCircle2, AlertCircle, X,
   ArrowLeft, RefreshCw, QrCode, Gift
 } from 'lucide-react'
 import Link from 'next/link'
@@ -238,7 +238,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
             </div>
           ) : (
             <>
-              <OrderStatusBar currentStep={status.step} statusColor={status.color} />
+              <OrderStatusBar currentStep={status.step} />
               
               {order.status === 'pending' && (
                 <div className="bg-amber-50/50 border border-amber-100 border-dashed rounded-2xl p-4 mb-5 text-center">
@@ -246,14 +246,6 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
                 </div>
               )}
 
-              {order.status !== 'completed' && (
-                <div className="flex justify-center mb-5">
-                  <div className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-slate-900 text-white rounded-full">
-                    <Clock size={14} className="text-orange-400" />
-                    <span className="text-[12px] font-black">预计送达：{getCountdown(order.scheduled_time)}</span>
-                  </div>
-                </div>
-              )}
 
               <div className="space-y-3">
                 {order.status === 'pending' && (merchant?.payment_qr_urls?.wechat || merchant?.payment_qr_urls?.alipay || merchant?.payment_qr_url) && (
@@ -321,7 +313,9 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
         <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
           <OrderItemsCard
             title="订单内容" titleAsHeading items={items} usedCoupons={usedCoupons}
-            couponDiscountAmount={Number(order.coupon_discount_amount)} totalAmount={Number(order.total_amount)}
+            couponDiscountAmount={Number(order.coupon_discount_amount)} 
+            vipDiscountAmount={Number(order.vip_discount_amount)}
+            totalAmount={Number(order.total_amount)}
             createdAt={order.created_at} refundAmount={order.refund_amount} refundResolved={order.after_sales_status === 'resolved'}
             penaltyRate={order.penalty_rate} penaltyAmount={order.penalty_amount} totalColor="var(--color-primary)"
           />

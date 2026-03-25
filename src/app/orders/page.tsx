@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import type { Merchant, Order } from '@/lib/types'
 import { lastFourDigits } from '@/lib/utils'
-import { ArrowLeft, Clock, Search, User, ChevronDown, ChevronUp, ShoppingBag, History, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Clock, Search, User, ChevronDown, ChevronUp, ShoppingBag, History, ChevronRight, MapPin } from 'lucide-react'
 import Link from 'next/link'
 import OrderManagerModal from '@/components/OrderManagerModal'
 import { Badge } from "@/components/ui/badge"
@@ -256,16 +256,17 @@ export default function OrdersPage() {
                         group.latest.after_sales_status === 'pending' ? "bg-rose-50 border-rose-200 shadow-sm" : "bg-slate-50/50 border-slate-100"
                       )}
                     >
-                      <div className="space-y-1">
+                      <div className="space-y-2.5">
                         <div className="flex items-center gap-2">
                           <Badge className={cn("text-[9px] font-black uppercase h-4.5 px-2", STATUS_COLORS[group.latest.status])}>
                             {STATUS_LABELS[group.latest.status]}
                           </Badge>
                           <span className="text-[13px] font-black text-slate-700 tracking-tight">尾号 {lastFourDigits(group.latest.phone)} · {formatPrice(Number(group.latest.total_amount))}</span>
                         </div>
-                        <p className="text-[11px] text-slate-400 font-bold truncate max-w-[200px]">
-                          {group.latest.address}
-                        </p>
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-bold">
+                          <MapPin size={12} className="text-slate-300 shrink-0" />
+                          <span className="line-clamp-1">{group.latest.address}</span>
+                        </div>
                       </div>
                       <Button variant="ghost" size="sm" className="rounded-xl font-black text-orange-600 hover:bg-orange-100/50">
                         详情

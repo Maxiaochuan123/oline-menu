@@ -753,7 +753,7 @@ export default function CouponsPage() {
                                     disabled={isUnlimited}
                                     className={cn(
                                       "h-11 rounded-xl font-bold border-slate-100 placeholder:text-sm placeholder:font-normal placeholder:text-slate-400 transition-all",
-                                      isUnlimited && "bg-slate-50 text-slate-300 italic font-medium opacity-50"
+                                      isUnlimited && "bg-slate-50 text-slate-300 font-medium opacity-50"
                                     )}
                                     {...field}
                                     value={field.value ?? ''}

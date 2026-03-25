@@ -4,10 +4,9 @@ import { cn } from '@/lib/utils'
 
 interface OrderStatusBarProps {
   currentStep: number
-  statusColor: string
 }
 
-export default function OrderStatusBar({ currentStep, statusColor }: OrderStatusBarProps) {
+export default function OrderStatusBar({ currentStep }: OrderStatusBarProps) {
   const steps = [
     { id: 1, label: '待收单' },
     { id: 2, label: '制作中' },
@@ -19,14 +18,14 @@ export default function OrderStatusBar({ currentStep, statusColor }: OrderStatus
   if (currentStep === 0) return null
 
   return (
-    <div className="flex items-center justify-between px-2 mb-8 mt-2">
+    <div className="flex items-center justify-between px-2 mb-10 mt-4">
       {steps.map((step, idx) => (
         <div key={step.id} className="flex-1 flex flex-col items-center relative">
           {/* 连接线 */}
           {idx < steps.length - 1 && (
             <div 
               className={cn(
-                "absolute top-[14px] left-[50%] w-full h-[2px] transition-all duration-700",
+                "absolute top-[18px] left-[50%] w-full h-[3px] transition-all duration-700 rounded-full",
                 currentStep > step.id ? "bg-orange-500" : "bg-slate-100"
               )} 
             />
@@ -35,14 +34,16 @@ export default function OrderStatusBar({ currentStep, statusColor }: OrderStatus
           {/* 圆点 */}
           <div 
             className={cn(
-              "z-10 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-500 border-2 border-white",
-              currentStep >= step.id ? "bg-orange-500 shadow-md shadow-orange-200 scale-110" : "bg-slate-100"
+              "z-10 w-9 h-9 rounded-full flex items-center justify-center transition-all duration-500 border-[3px] border-white shadow-sm",
+              currentStep >= step.id 
+                ? "bg-orange-500 shadow-xl shadow-orange-200 scale-110" 
+                : "bg-slate-100 border-none"
             )}
           >
             {currentStep > step.id ? (
-              <span className="text-white text-[10px] font-black italic">✔</span>
+              <span className="text-white text-[12px] font-black">✔</span>
             ) : (
-              <span className={cn("text-[10px] font-black", currentStep === step.id ? "text-white" : "text-slate-400")}>
+              <span className={cn("text-[13px] font-black", currentStep === step.id ? "text-white" : "text-slate-400")}>
                 {step.id}
               </span>
             )}
@@ -50,8 +51,8 @@ export default function OrderStatusBar({ currentStep, statusColor }: OrderStatus
           
           {/* 文字说明 */}
           <span className={cn(
-            "text-[10px] mt-2.5 font-black tracking-tighter transition-colors",
-            currentStep === step.id ? "text-slate-900" : "text-slate-400"
+            "text-[12px] mt-3 font-black tracking-tight transition-all uppercase",
+            currentStep === step.id ? "text-slate-900 scale-105" : "text-slate-400"
           )}>
             {step.label}
           </span>

@@ -5,9 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import type { Merchant, Category, MenuItem, CartItem, Order, UserCoupon, Coupon, DisabledDate } from '@/lib/types'
 import { formatPrice, isWechat, isValidPhone, cn } from '@/lib/utils'
 import { calcDiscount, getVipLevel, VIP_LEVELS, getPointsToNextLevel, getCouponEligibleAmount } from '@/lib/membership'
-import {
-  Plus, Minus, ShoppingBag, Search, X, CheckCircle, Sparkles,
-  MapPin, Phone, User, Clock, Briefcase, UserRound, ArrowRight, Package, Gift, Star, ChevronRight
+import { useDraggableSticky } from '@/hooks/useDraggableSticky'
+import { 
+  Plus, Minus, ShoppingBag, Search, ChevronRight, X, Clock, MapPin, Phone, User, Star, Gift, Sparkles, UserRound, Briefcase, Calendar as CalendarIcon, Crown, CheckCircle, ArrowRight, Package
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
@@ -26,7 +26,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Calendar } from "@/components/ui/calendar"
 import { TimePicker } from "@/components/ui/time-picker"
-import { CalendarIcon } from 'lucide-react'
 import { zhCN } from "date-fns/locale"
 import { buttonVariants } from "@/components/ui/button"
 
@@ -43,6 +42,13 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const supabase = createClient()
   const router = useRouter()
   const { toast } = useToast()
+
+  // 悬浮订单进度条拖拽逻辑
+  const orderDraggable = useDraggableSticky({
+    initialY: 80,
+    margin: 16,
+    buttonWidth: 180
+  })
 
   const [merchant, setMerchant] = useState<Merchant | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -920,7 +926,9 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                     className="flex justify-between items-center text-xs cursor-pointer active:opacity-60 transition-opacity"
                   >
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-emerald-400 font-black shrink-0">⭐ {vipLevel.label} · {vipLevel.rate < 1 ? vipLevel.discount : '会员'}</span>
+                      <span className="text-emerald-400 font-black shrink-0 flex items-center gap-1">
+                        <Crown size={12} fill="currentColor" /> {vipLevel.label} · {vipLevel.rate < 1 ? vipLevel.discount : '会员'}
+                      </span>
                       {nextLevelInfo && (
                         <span className="text-emerald-400/60 font-medium truncate text-[10px]">
                           (再加 ¥{nextLevelInfo.needed.toFixed(0)}可享 {nextLevelInfo.nextLevel.label} {nextLevelInfo.nextLevel.discount})
@@ -1346,7 +1354,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
               >
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner" style={{ background: `linear-gradient(135deg, ${vipLevel.color}, ${vipLevel.color}dd)` }}>
-                    <Star size={20} className="text-white" />
+                    <Crown size={20} className="text-white" />
                   </div>
                   <div>
                     <div className="text-sm font-black flex items-center gap-1.5" style={{ color: vipLevel.color }}>
@@ -1379,7 +1387,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 <div className="space-y-2 mt-4 bg-slate-50 rounded-2xl p-3 border border-slate-100/50">
                   {discountResult.vipDiscountAmount > 0 && (
                     <div className="flex justify-between text-[13px]">
-                      <span className="text-emerald-600 font-bold flex items-center gap-1"><Star size={12} fill="currentColor"/> {vipLevel.label} {vipLevel.discount}</span>
+                      <span className="text-emerald-600 font-bold flex items-center gap-1"><Crown size={12} fill="currentColor"/> {vipLevel.label} {vipLevel.discount}</span>
                       <span className="text-emerald-600 font-black">-¥{formatPrice(discountResult.vipDiscountAmount).replace('¥', '')}</span>
                     </div>
                   )}
@@ -1614,7 +1622,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                       !(isPastLevel || isTargetLevel) && "opacity-60"
                     )}>
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner" style={{ background: `linear-gradient(135deg, ${lv.color}, ${lv.color}dd)` }}>
-                        <Star size={20} className="text-white" />
+                        <Crown size={20} className="text-white" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-black text-slate-900 text-[15px] truncate">{lv.label} · {lv.description}</div>
@@ -1920,29 +1928,62 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         </>
       )}
 
-      {/* 悬浮订单进度条 */}
+      {/* 悬浮订单进度条 (Premium UX 优化 + 可拖拽) */}
       {activeOrder && (
         <div
-          onClick={() => router.push(`/m/${merchantId}/order/${activeOrder.id}`)}
-          className="fixed right-4 bottom-20 z-50 bg-white rounded-[20px] shadow-[0_4px_20px_rgba(0,0,0,0.15)] px-4 py-2.5 flex items-center gap-2.5 cursor-pointer border-[1.5px] border-orange-500 max-w-[220px] animate-in fade-in duration-300"
+          ref={orderDraggable.dragRef}
+          {...orderDraggable.handlers}
+          onClick={() => !orderDraggable.isDragging && router.push(`/m/${merchantId}/order/${activeOrder.id}`)}
+          style={{
+            left: `${orderDraggable.dragX}px`,
+            top: `${orderDraggable.position.y}px`,
+            transition: orderDraggable.isDragging ? 'none' : 'all 0.5s cubic-bezier(0.19, 1, 0.22, 1)',
+            zIndex: 100
+          }}
+          className={cn(
+            "fixed z-50 bg-white/90 backdrop-blur-xl rounded-full shadow-[0_8px_32px_-8px_rgba(0,0,0,0.15)] px-4 py-2.5 flex items-center gap-3 cursor-pointer border-[1.5px] group touch-none",
+            activeOrder.status === 'pending' ? 'border-orange-500/50 shadow-orange-200/20' :
+            activeOrder.status === 'preparing' ? 'border-blue-500/50 shadow-blue-200/20' : 
+            'border-emerald-500/50 shadow-emerald-200/20'
+          )}
         >
-          <div className="size-8 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
-            {activeOrder.status === 'pending' && <Clock size={16} className="text-orange-500" />}
-            {activeOrder.status === 'preparing' && <Package size={16} className="text-blue-500" />}
-            {activeOrder.status === 'delivering' && <ArrowRight size={16} className="text-emerald-500" />}
-          </div>
-          <div className="min-w-0">
-            <div className="text-[11px] text-slate-400 font-bold">我的订单</div>
+          {/* 动态图标容器 */}
+          <div className="relative shrink-0">
             <div className={cn(
-              "text-[13px] font-bold truncate",
-              activeOrder.status === 'pending' ? 'text-orange-500' :
-              activeOrder.status === 'preparing' ? 'text-blue-500' : 'text-emerald-500'
+              "size-9 rounded-full flex items-center justify-center relative z-10",
+              activeOrder.status === 'pending' ? 'bg-orange-50' :
+              activeOrder.status === 'preparing' ? 'bg-blue-50' : 'bg-emerald-50'
             )}>
-              {activeOrder.status === 'pending' && '等待商家接单...'}
-              {activeOrder.status === 'preparing' && '制作中✨'}
-              {activeOrder.status === 'delivering' && '配送中 😋'}
+              {activeOrder.status === 'pending' && <Clock size={18} className="text-orange-500" />}
+              {activeOrder.status === 'preparing' && <Package size={18} className="text-blue-500 animate-bounce-slow" />}
+              {activeOrder.status === 'delivering' && <ArrowRight size={18} className="text-emerald-500" />}
+            </div>
+            {/* 呼吸光晕 */}
+            <div className={cn(
+              "absolute inset-0 rounded-full animate-ping opacity-20 scale-125",
+              activeOrder.status === 'pending' ? 'bg-orange-400' :
+              activeOrder.status === 'preparing' ? 'bg-blue-400' : 'bg-emerald-400'
+            )} />
+          </div>
+
+          <div className="min-w-0 pr-1">
+            <div className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-0.5">我的订单</div>
+            <div className={cn(
+                  "text-[14px] font-black truncate flex items-center gap-1.5",
+                  activeOrder.status === 'pending' ? 'text-orange-600' :
+                  activeOrder.status === 'preparing' ? 'text-blue-600' : 'text-emerald-700'
+                )}>
+              {activeOrder.status === 'pending' && '等待接单...'}
+              {activeOrder.status === 'preparing' && '备菜制作中 ✨'}
+              {activeOrder.status === 'delivering' && '订单配送中 😋'}
             </div>
           </div>
+
+          <ChevronRight size={16} className={cn(
+            "transition-transform group-hover:translate-x-0.5",
+            activeOrder.status === 'pending' ? 'text-orange-300' :
+            activeOrder.status === 'preparing' ? 'text-blue-300' : 'text-emerald-300'
+          )} />
         </div>
       )}
 

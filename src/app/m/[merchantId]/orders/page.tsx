@@ -172,11 +172,7 @@ export default function CustomerOrdersPage({ params }: { params: Promise<{ merch
                         再来一单
                       </div>
                     )}
-                    {['pending', 'preparing', 'delivering'].includes(order.status) && (
-                      <div className="px-4 py-1.5 rounded-full text-xs font-black bg-orange-500 text-white shadow-md shadow-orange-200">
-                        跟踪状态
-                      </div>
-                    )}
+                    {/* 移除跟踪状态按钮，整个卡片已支持点击跳转 */}
                   </div>
                 </Link>
               )

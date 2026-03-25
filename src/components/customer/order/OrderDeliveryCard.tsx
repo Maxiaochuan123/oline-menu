@@ -1,7 +1,5 @@
-'use client'
-
-import { MapPin, Clock, Phone, User, Copy } from 'lucide-react'
-import { toast } from 'sonner'
+import { MapPin, Clock, Phone, User } from 'lucide-react'
+import CopyButton from '@/components/common/CopyButton'
 
 interface OrderDeliveryCardProps {
   scheduledTime: string
@@ -11,21 +9,15 @@ interface OrderDeliveryCardProps {
 }
 
 export default function OrderDeliveryCard({ scheduledTime, address, customerName, phone }: OrderDeliveryCardProps) {
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success('已复制到剪贴板')
-  }
-
   return (
     <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-4 animate-in fade-in slide-in-from-bottom duration-700 delay-150">
-      <h3 className="text-sm font-black text-slate-900 border-b border-slate-50 pb-4 mb-4 flex items-center justify-between">
+      <h3 className="text-sm font-black text-slate-900 border-b border-slate-50 pb-4 mb-4 flex items-center justify-between uppercase tracking-tight">
         配送信息
-        <button 
-          onClick={() => handleCopy(address)}
-          className="text-[10px] text-slate-400 font-bold bg-slate-50 px-2 py-1 rounded-lg flex items-center gap-1 active:scale-95"
-        >
-          <Copy size={10} /> 复制地址
-        </button>
+        <CopyButton 
+          text={address} 
+          initialLabel="复制地址" 
+          className="shadow-none ring-0 h-7" 
+        />
       </h3>
       
       <div className="space-y-5">

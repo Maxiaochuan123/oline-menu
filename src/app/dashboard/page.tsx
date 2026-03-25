@@ -9,7 +9,7 @@ import type { Merchant, Order } from '@/lib/types'
 import { formatPrice, speak, lastFourDigits, cn } from '@/lib/utils'
 import {
   Menu, X, LogOut, UtensilsCrossed, ClipboardList, Users,
-  ChefHat, TrendingUp, Clock, Copy, Check, Settings, MessageSquare, Tag,
+  ChefHat, TrendingUp, Clock, Settings, MessageSquare, Tag,
   Star
 } from 'lucide-react'
 import Link from 'next/link'
@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-
+import CopyButton from '@/components/common/CopyButton'
 
 export default function DashboardPage() {
   const supabase = createClient()
@@ -28,7 +28,6 @@ export default function DashboardPage() {
   const [merchant, setMerchant] = useState<Merchant | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [todayOrders, setTodayOrders] = useState<Order[]>([])
-  const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
   const [unreadMsgCount, setUnreadMsgCount] = useState(0)
   const [pendingAfterSalesCount, setPendingAfterSalesCount] = useState(0)
@@ -171,43 +170,10 @@ export default function DashboardPage() {
     }
   }, [merchant, supabase, loadData])
 
-  // Fallback copy function for non-secure contexts
-  const copyToClipboard = (text: string) => {
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text)
-    } else {
-      // Fallback for non-secure contexts or older browsers
-      const textArea = document.createElement('textarea')
-      textArea.value = text
-      textArea.style.position = 'fixed' // Avoid scrolling to bottom
-      textArea.style.left = '-999999px' // Move outside the screen to hide it
-      document.body.appendChild(textArea)
-      textArea.focus()
-      textArea.select()
-      try {
-        document.execCommand('copy')
-      } catch (err) {
-        console.error('Fallback: Oops, unable to copy', err)
-      }
-      document.body.removeChild(textArea)
-    }
-  }
-
-  function copyShareLink() {
-    if (!merchant) return
-    const link = `${window.location.origin}/m/${merchant.id}`
-    const text = `${link}`
-    copyToClipboard(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
   async function handleLogout() {
     await supabase.auth.signOut()
     router.push('/login')
   }
-
-  // ============== 订单处理组件化完毕 ==============
 
   if (loading) {
     return (
@@ -271,18 +237,11 @@ export default function DashboardPage() {
           </div>
         </div>
         
-        <Button 
-          variant={copied ? "default" : "outline"}
-          size="sm"
-          onClick={copyShareLink}
-          className={cn(
-            "rounded-full font-black text-xs transition-all duration-300",
-            copied ? "bg-emerald-500 hover:bg-emerald-600 border-none px-4 shadow-lg shadow-emerald-200" : "bg-white shadow-sm"
-          )}
-        >
-          {copied ? <Check size={14} className="mr-1" /> : <Copy size={14} className="mr-1" />}
-          {copied ? '已复制' : '分享链接'}
-        </Button>
+        <CopyButton 
+          text={`${typeof window !== 'undefined' ? window.location.origin : ''}/m/${merchant?.id}`}
+          initialLabel="分享链接"
+          className="active:scale-95 shadow-sm"
+        />
       </header>
 
       {/* 主体内容 */}

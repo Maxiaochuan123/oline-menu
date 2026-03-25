@@ -593,7 +593,9 @@ export default function OrderManagerModal({
                     items={orderItems}
                     showRemark
                     usedCoupons={usedCoupons}
-                    couponDiscountAmount={Number(order.coupon_discount_amount)}
+                    couponDiscountAmount={Number(order.coupon_discount_amount || 0)}
+                    vipDiscountAmount={Number(order.vip_discount_amount || 0)}
+                    originalAmount={Number(order.total_amount) + Number(order.coupon_discount_amount || 0) + Number(order.vip_discount_amount || 0)}
                     totalAmount={Number(order.total_amount)}
                     createdAt={order.created_at}
                     penaltyRate={order.penalty_rate}
@@ -614,7 +616,7 @@ export default function OrderManagerModal({
                   <ScrollArea className="h-[240px] px-4 py-2" ref={msgBoxRef}>
                     <div className="space-y-3 py-2">
                       {messages.length === 0 ? (
-                        <div className="text-center text-slate-400 text-xs py-12 italic font-medium">暂无沟通记录</div>
+                        <div className="text-center text-slate-400 text-xs py-12 font-medium">暂无沟通记录</div>
                       ) : messages.map((msg, idx) => {
                         const prevMsg = idx > 0 ? messages[idx - 1] : null
                         const showTime = !prevMsg || (new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() > 5 * 60 * 1000)
@@ -674,7 +676,7 @@ export default function OrderManagerModal({
               <AlertTriangle className="size-6" /> 确认取消订单？
             </AlertDialogTitle>
             <AlertDialogDescription className="text-slate-600 font-medium leading-relaxed">
-              商家取消订单将触发 <span className="text-red-600 font-bold italic">全额退款</span>。系统将自动回退客户已使用的积分和优惠券。此操作为高危行为，不可逆转，请慎重考虑。
+              商家取消订单将触发 <span className="text-red-600 font-bold">全额退款</span>。系统将自动回退客户已使用的积分和优惠券。此操作为高危行为，不可逆转，请慎重考虑。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-3 sm:gap-0 font-bold">
@@ -698,9 +700,9 @@ export default function OrderManagerModal({
             </div>
             
             <div className="flex items-center gap-4 py-3 px-8 bg-white rounded-3xl shadow-sm ring-1 ring-slate-100">
-               <Badge variant="secondary" className="px-4 py-1 text-sm bg-slate-100 text-slate-500 border-none font-bold italic">{STATUS_LABELS[order.status]}</Badge>
+               <Badge variant="secondary" className="px-4 py-1 text-sm bg-slate-100 text-slate-500 border-none font-bold">{STATUS_LABELS[order.status]}</Badge>
                <ChevronRight className="text-orange-400 size-5 animate-pulse" />
-               <Badge className="px-4 py-1 text-sm bg-orange-500 text-white border-none font-black italic shadow-md shadow-orange-100">{STATUS_LABELS[nextStatus]}</Badge>
+               <Badge className="px-4 py-1 text-sm bg-orange-500 text-white border-none font-black shadow-md shadow-orange-100">{STATUS_LABELS[nextStatus]}</Badge>
             </div>
             
             <p className="text-sm font-black text-slate-400 bg-slate-100/80 px-4 py-1.5 rounded-full uppercase tracking-widest leading-none">
@@ -736,7 +738,7 @@ export default function OrderManagerModal({
                       <span className="flex items-center gap-1.5"><AlertTriangle size={12} /> 智算中心建议扣除损耗 ({(suggestedRefund.rate * 100).toFixed(0)}%)</span>
                       <span className="font-mono text-sm">-{formatPrice(suggestedRefund.amount)}</span>
                     </div>
-                    <p className="text-[10px] text-orange-600/80 leading-relaxed font-bold italic border-l-2 border-orange-200 pl-2">原因：{suggestedRefund.reason}</p>
+                    <p className="text-[10px] text-orange-600/80 leading-relaxed font-bold border-l-2 border-orange-200 pl-2">原因：{suggestedRefund.reason}</p>
                     <Separator className="bg-orange-200/40" />
                     <div className="flex justify-between items-center pt-1">
                       <span className="text-xs font-black text-orange-800 uppercase tracking-tight">建议最优退款值</span>
@@ -881,7 +883,7 @@ export default function OrderManagerModal({
               <AlertTriangle className="size-6" /> 确认取消订单？
             </AlertDialogTitle>
             <AlertDialogDescription className="text-slate-600 font-medium leading-relaxed">
-              商家取消订单将触发 <span className="text-red-600 font-bold italic">全额退款</span>。系统将自动回退客户已使用的积分和优惠券。此操作为高危行为，不可逆转，请慎重考虑。
+              商家取消订单将触发 <span className="text-red-600 font-bold">全额退款</span>。系统将自动回退客户已使用的积分和优惠券。此操作为高危行为，不可逆转，请慎重考虑。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-3 sm:gap-0 font-bold">
@@ -905,9 +907,9 @@ export default function OrderManagerModal({
             </div>
             
             <div className="flex items-center gap-4 py-3 px-8 bg-white rounded-3xl shadow-sm ring-1 ring-slate-100">
-               <Badge variant="secondary" className="px-4 py-1 text-sm bg-slate-100 text-slate-500 border-none font-bold italic">{STATUS_LABELS[order.status]}</Badge>
+               <Badge variant="secondary" className="px-4 py-1 text-sm bg-slate-100 text-slate-500 border-none font-bold">{STATUS_LABELS[order.status]}</Badge>
                <ChevronRight className="text-orange-400 size-5 animate-pulse" />
-               <Badge className="px-4 py-1 text-sm bg-orange-500 text-white border-none font-black italic shadow-md shadow-orange-100">{STATUS_LABELS[nextStatus]}</Badge>
+               <Badge className="px-4 py-1 text-sm bg-orange-500 text-white border-none font-black shadow-md shadow-orange-100">{STATUS_LABELS[nextStatus]}</Badge>
             </div>
             
             <p className="text-sm font-black text-slate-400 bg-slate-100/80 px-4 py-1.5 rounded-full uppercase tracking-widest leading-none">
