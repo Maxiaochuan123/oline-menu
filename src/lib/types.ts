@@ -41,6 +41,7 @@ export interface Customer {
   merchant_id: string
   phone: string
   name: string
+  avatar_url?: string | null
   address: string | null
   order_count: number
   total_spent: number
@@ -143,6 +144,7 @@ export interface Coupon {
   stackable: boolean                // 可叠加使用
   total_quantity: number | null      // 发放总量（null=不限量）
   claimed_count: number              // 已领取数量
+  start_time: string | null          // 生效时间
   rating?: number | null
   created_at: string
 }

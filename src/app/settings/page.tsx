@@ -9,8 +9,9 @@ import type { Merchant, DisabledDate } from '@/lib/types'
 import { ArrowLeft, Upload, Trash2, Plus, Power, Store, Bell, Wallet, CalendarDays, CalendarIcon, Pencil } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { format } from "date-fns"
+import { format, eachDayOfInterval } from "date-fns"
 import { zhCN } from "date-fns/locale"
+import type { DateRange } from "react-day-picker"
 import { useToast } from '@/components/common/Toast'
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -37,7 +38,6 @@ import {
 } from "@/components/ui/form"
 
 const disabledDateSchema = z.object({
-  disabled_date: z.string().min(1, "请选择停业日期"),
   reason: z.string().optional(),
 })
 
@@ -61,7 +61,6 @@ export default function SettingsPage() {
   const form = useForm<DisabledDateFormValues>({
     resolver: zodResolver(disabledDateSchema),
     defaultValues: {
-      disabled_date: '',
       reason: '',
     }
   })
@@ -69,6 +68,8 @@ export default function SettingsPage() {
   const [alipayFile, setAlipayFile] = useState<File | null>(null)
   const [wechatPreview, setWechatPreview] = useState<string | null>(null)
   const [alipayPreview, setAlipayPreview] = useState<string | null>(null)
+  const [selectedRange, setSelectedRange] = useState<DateRange | undefined>()
+  const [singleDate, setSingleDate] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -155,8 +156,12 @@ export default function SettingsPage() {
     if (!merchant) return
     
     if (editingId) {
+      if (!singleDate) {
+        toast('请选择停业日期', 'warning')
+        return
+      }
       const { error } = await supabase.from('disabled_dates').update({
-        disabled_date: values.disabled_date,
+        disabled_date: singleDate,
         reason: values.reason || null,
       }).eq('id', editingId)
 
@@ -166,21 +171,35 @@ export default function SettingsPage() {
       }
       toast('已更新停业日期')
     } else {
-      const { error } = await supabase.from('disabled_dates').insert({
-        merchant_id: merchant.id,
-        disabled_date: values.disabled_date,
-        reason: values.reason || null,
+      if (!selectedRange || !selectedRange.from) {
+        toast('请选择停业日期范围', 'warning')
+        return
+      }
+
+      const days = eachDayOfInterval({
+        start: selectedRange.from,
+        end: selectedRange.to || selectedRange.from
       })
+
+      const inserts = days.map(day => ({
+        merchant_id: merchant.id,
+        disabled_date: format(day, "yyyy-MM-dd"),
+        reason: values.reason || null,
+      }))
+
+      const { error } = await supabase.from('disabled_dates').insert(inserts)
       
       if (error) {
         toast('添加失败: ' + error.message, 'error')
         return
       }
-      toast('已添加停业日期')
+      toast(`已成功添加 ${inserts.length} 天停业日期`)
     }
 
     form.reset()
     setEditingId(null)
+    setSingleDate('')
+    setSelectedRange(undefined)
     setShowDateForm(false)
     loadData()
   }
@@ -446,7 +465,7 @@ export default function SettingsPage() {
                         className="size-8 text-slate-400 active:text-emerald-500 active:bg-emerald-50"
                         onClick={() => {
                           setEditingId(d.id);
-                          form.setValue('disabled_date', d.disabled_date);
+                          setSingleDate(d.disabled_date);
                           form.setValue('reason', d.reason || '');
                           setShowDateForm(true);
                         }}
@@ -509,38 +528,52 @@ export default function SettingsPage() {
           
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmitDate)} className="space-y-6 py-4">
-              <FormField
-                control={form.control}
-                name="disabled_date"
-                render={({ field }) => (
-                  <FormItem className="space-y-2">
-                    <FormLabel className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">选择停业日期</FormLabel>
-                    <Popover>
-                      <PopoverTrigger 
-                        className={cn(
-                          buttonVariants({ variant: "outline" }),
-                          "w-full h-12 justify-start text-left font-bold rounded-xl border-slate-100 bg-slate-50 transition-all focus:ring-emerald-500",
-                          !field.value && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4 text-emerald-500" />
-                        {field.value ? format(new Date(field.value), "yyyy-MM-dd") : <span className="text-slate-400 font-normal">点击选择日期</span>}
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 rounded-2xl border-none shadow-2xl" align="start">
-                        <Calendar
-                          mode="single"
-                          locale={zhCN}
-                          selected={field.value ? new Date(field.value) : undefined}
-                          onSelect={(date) => field.onChange(date ? format(date, "yyyy-MM-dd") : '')}
-                          initialFocus
-                          className="rounded-2xl"
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage className="text-[10px] font-black text-rose-500 ml-1" />
-                  </FormItem>
-                )}
-              />
+              <div className="space-y-2">
+                <Label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                  {editingId ? '选择停业日期' : '选择停业范围'}
+                </Label>
+                <Popover>
+                  <PopoverTrigger 
+                    className={cn(
+                      buttonVariants({ variant: "outline" }),
+                      "w-full h-12 justify-start text-left font-bold rounded-xl border-slate-100 bg-slate-50 transition-all focus:ring-emerald-500",
+                      !(editingId ? singleDate : (selectedRange?.from)) && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4 text-emerald-500" />
+                    {editingId ? (
+                      singleDate ? format(new Date(singleDate), "yyyy-MM-dd") : <span className="text-slate-400 font-normal">点击选择日期</span>
+                    ) : (
+                      selectedRange?.from ? (
+                        selectedRange.to ? (
+                          `${format(selectedRange.from, "MM/dd")} - ${format(selectedRange.to, "MM/dd")}`
+                        ) : format(selectedRange.from, "yyyy-MM-dd")
+                      ) : <span className="text-slate-400 font-normal">点击选择停业范围</span>
+                    )}
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 rounded-2xl border-none shadow-2xl" align="start">
+                    {editingId ? (
+                      <Calendar
+                        mode="single"
+                        locale={zhCN}
+                        selected={singleDate ? new Date(singleDate) : undefined}
+                        onSelect={(val) => setSingleDate(val ? format(val, "yyyy-MM-dd") : '')}
+                        initialFocus
+                        className="rounded-2xl"
+                      />
+                    ) : (
+                      <Calendar
+                        mode="range"
+                        locale={zhCN}
+                        selected={selectedRange}
+                        onSelect={setSelectedRange}
+                        initialFocus
+                        className="rounded-2xl"
+                      />
+                    )}
+                  </PopoverContent>
+                </Popover>
+              </div>
 
               <FormField
                 control={form.control}

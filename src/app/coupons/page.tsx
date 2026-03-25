@@ -2,11 +2,11 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import type { Merchant, Category, Customer, Coupon, MenuItem } from '@/lib/types'
-import { ArrowLeft, Plus, Tag, Users, Search, ChevronRight, Gift, Calendar, Ticket, AlertTriangle, Check, Trash2, LayoutGrid, X, Clock, Eye, EyeOff } from 'lucide-react'
+import type { Merchant, Category, Customer, Coupon, MenuItem, DisabledDate } from '@/lib/types'
+import { ArrowLeft, Plus, Tag, Users, Search, ChevronRight, Gift, Calendar, Ticket, AlertTriangle, Check, Trash2, LayoutGrid, X, Clock, Eye, EyeOff, Timer } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,13 +15,17 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 import { Label } from "@/components/ui/label"
 import { useToast } from '@/components/common/Toast'
 import { cn } from '@/lib/utils'
+import { format } from "date-fns"
+import { zhCN } from "date-fns/locale"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
+import { BusinessDateTimePicker } from "@/components/common/BusinessDateTimePicker"
 import {
   Form,
   FormControl,
@@ -30,6 +34,58 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+
+/**
+ * 动态倒计时组件
+ * 提供秒级跳动更新，提升系统“实时感知”和高级感
+ */
+function LiveCountdown({ targetDate, onEnd }: { targetDate: Date, onEnd?: () => void }) {
+  const [timeLeft, setTimeLeft] = useState<string>('')
+  const [isNear, setIsNear] = useState(false)
+  const hasEnded = useRef(false)
+
+  useEffect(() => {
+    const update = () => {
+      const now = new Date()
+      const diff = targetDate.getTime() - now.getTime()
+
+      if (diff <= 0) {
+        setTimeLeft('正在生效...')
+        if (!hasEnded.current) {
+          hasEnded.current = true
+          onEnd?.()
+        }
+        return
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24)
+      const minutes = Math.floor((diff / (1000 * 60)) % 60)
+      const seconds = Math.floor((diff / 1000) % 60)
+
+      setIsNear(days === 0 && hours === 0 && minutes < 60)
+
+      if (days > 0) {
+        setTimeLeft(`${days}天 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`)
+      } else {
+        setTimeLeft(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`)
+      }
+    }
+
+    update()
+    const timer = setInterval(update, 1000)
+    return () => clearInterval(timer)
+  }, [targetDate, onEnd])
+
+  return (
+    <span className={cn(
+      "text-sm font-black tracking-tight tabular-nums transition-colors duration-500",
+      isNear ? "text-violet-600" : "text-indigo-500"
+    )}>
+      {timeLeft}
+    </span>
+  )
+}
 
 const couponSchema = z.object({
   title: z.string().min(1, "请输入卡券名称"),
@@ -44,14 +100,21 @@ const couponSchema = z.object({
     .refine((v) => !isNaN(Number(v)) && Number(v) >= 1, "有效期至少1天"),
   is_newcomer_reward: z.boolean().default(false),
   target_type: z.enum(['all', 'category', 'customer']),
+  start_time: z.date().nullable().optional(),
   target_category_id: z.string().nullable().optional(),
   target_customer_ids: z.array(z.string()).default([]),
   target_item_ids: z.array(z.string()).default([]),
   stackable: z.boolean().default(false),
-  total_quantity: z.union([z.number(), z.string(), z.undefined()])
-    .refine((v) => v == null || v === '' || v === undefined || Number(v) >= 1, "发行量至少为1张")
-    .optional(),
+  total_quantity: z.any().optional(),
   is_unlimited: z.boolean().default(false),
+}).refine((data) => {
+  if (!data.is_unlimited) {
+    return data.total_quantity !== '' && data.total_quantity != null && !isNaN(Number(data.total_quantity)) && Number(data.total_quantity) >= 1;
+  }
+  return true;
+}, {
+  message: "请输入发放总量 (至少1张)",
+  path: ["total_quantity"],
 }).refine((data) => {
   if (data.target_type === 'category') {
     return data.target_item_ids.length > 0;
@@ -81,6 +144,7 @@ export default function CouponsPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [disabledDates, setDisabledDates] = useState<DisabledDate[]>([])
   const [couponStats, setCouponStats] = useState<Record<string, {used: number, pending: number, expired: number}>>({})
   const [loading, setLoading] = useState(true)
 
@@ -90,15 +154,16 @@ export default function CouponsPage() {
       title: '',
       amount: '' as unknown as number,
       min_spend: '' as unknown as number,
-      expiry_days: 7 as unknown as number,
+      expiry_days: '' as unknown as number,
       is_newcomer_reward: false,
       target_type: 'all',
       target_category_id: null,
       target_customer_ids: [],
       target_item_ids: [],
       stackable: false,
-      total_quantity: 100,
+      total_quantity: '' as unknown as number,
       is_unlimited: false,
+      start_time: null,
     },
   })
 
@@ -133,16 +198,18 @@ export default function CouponsPage() {
     if (!m) return
     setMerchant(m)
 
-    const [cpnRes, catRes, itemRes, custRes] = await Promise.all([
+    const [cpnRes, catRes, itemRes, custRes, dRes] = await Promise.all([
       supabase.from('coupons').select('*').eq('merchant_id', m.id).order('created_at', { ascending: false }),
       supabase.from('categories').select('*').eq('merchant_id', m.id).order('sort_order'),
       supabase.from('menu_items').select('*').eq('merchant_id', m.id).order('name'),
       supabase.from('customers').select('*').eq('merchant_id', m.id).order('name'),
+      supabase.from('disabled_dates').select('*').eq('merchant_id', m.id),
     ])
     setCoupons(cpnRes.data || [])
     setCategories(catRes.data || [])
     setMenuItems(itemRes.data || [])
     setCustomers(custRes.data || [])
+    setDisabledDates(dRes.data || [])
 
     if (cpnRes.data && cpnRes.data.length > 0) {
       const cpnIds = cpnRes.data.map(c => c.id)
@@ -198,6 +265,7 @@ export default function CouponsPage() {
       target_type: values.target_type,
       stackable: values.stackable,
       status: 'active',
+      start_time: values.start_time ? values.start_time.toISOString() : null,
     }
 
     if (values.is_unlimited) {
@@ -317,7 +385,21 @@ export default function CouponsPage() {
         <Button 
           size="sm" 
           onClick={() => {
-            reset({ title: '', amount: undefined, min_spend: undefined, expiry_days: 7, is_newcomer_reward: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: 100, is_unlimited: false });
+            reset({ 
+              title: '', 
+              amount: '' as unknown as number, 
+              min_spend: '' as unknown as number, 
+              expiry_days: '' as unknown as number, 
+              is_newcomer_reward: false, 
+              target_type: 'all', 
+              target_category_id: null, 
+              target_customer_ids: [], 
+              target_item_ids: [], 
+              stackable: false, 
+              total_quantity: '' as unknown as number, 
+              is_unlimited: false, 
+              start_time: null 
+            });
             setShowForm(true);
           }}
           className="rounded-full bg-slate-900 hover:bg-slate-800 text-white font-black text-xs px-4"
@@ -343,7 +425,7 @@ export default function CouponsPage() {
             </div>
             <Button 
               onClick={() => {
-                reset({ title: '', amount: undefined, min_spend: undefined, expiry_days: 7, is_newcomer_reward: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: 100, is_unlimited: false });
+                reset({ title: '', amount: '' as unknown as number, min_spend: '' as unknown as number, expiry_days: 7, is_newcomer_reward: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: 100, is_unlimited: false, start_time: null });
                 setShowForm(true);
               }}
               className="h-14 px-10 rounded-2xl bg-orange-600 hover:bg-orange-500 text-white font-black text-[15px] shadow-xl shadow-orange-100 transition-all active:scale-95 flex gap-2"
@@ -378,11 +460,15 @@ export default function CouponsPage() {
                       target_customer_ids: c.target_customer_ids || [],
                       target_item_ids: c.target_item_ids || [],
                       stackable: c.stackable,
-                      total_quantity: c.total_quantity ?? 100,
-                      is_unlimited: c.total_quantity === null
+                      total_quantity: c.total_quantity ?? (c.total_quantity === null ? '' : ''),
+                      is_unlimited: c.total_quantity === null,
+                      // 判定逻辑：如果 start_time 和 created_at 很接近（1分钟内），我们就认为它没定过时，
+                      // 从而在查看详情时开关呈关闭状态。
+                      start_time: c.start_time && (new Date(c.start_time).getTime() - new Date(c.created_at).getTime() > 60000) 
+                        ? new Date(c.start_time) 
+                        : null
                     });
 
-                    // 自动展开已选中的菜品分类树
                     if (c.target_type === 'category' && c.target_item_ids?.length) {
                       const expanded = new Set<string>();
                       menuItems.forEach(item => {
@@ -399,9 +485,10 @@ export default function CouponsPage() {
                   }}
                 >
                   <CardContent className="p-0 flex h-40 relative bg-white rounded-[24px] overflow-hidden">
-                    {/* 左侧面值装饰区 (改为向右轻微渐变) */}
+                    {/* 左侧面值装饰区 */}
                     <div className={cn(
                       "w-28 sm:w-32 py-5 flex flex-col items-center justify-center text-white shrink-0 relative transition-all duration-500 rounded-l-[24px]",
+                      c.start_time && new Date(c.start_time) > new Date() ? "bg-gradient-to-br from-violet-600 to-indigo-500 shadow-lg shadow-violet-100/50" :
                       c.target_type === 'all' ? "bg-gradient-to-r from-orange-600 to-orange-500" :
                       c.target_type === 'category' ? "bg-gradient-to-r from-indigo-600 to-indigo-500" :
                       "bg-gradient-to-r from-emerald-600 to-emerald-500"
@@ -422,12 +509,18 @@ export default function CouponsPage() {
                       </div>
                     </div>
 
-                    {/* 移除撕票样式，改用极细微的右侧边缘过渡阴影 */}
                     <div className="absolute top-0 bottom-0 left-28 sm:left-32 w-4 bg-gradient-to-r from-black/5 to-transparent pointer-events-none z-10" />
 
                     {/* 右侧信息区 */}
                     <div className="flex-1 px-5 py-3.5 pb-5 flex flex-col justify-between bg-white relative">
-                      <div className="space-y-1">
+                      {c.start_time && new Date(c.start_time) > new Date() && (
+                        <div className="absolute top-0 right-0 px-3 py-1 bg-violet-600 text-white rounded-bl-2xl flex items-center gap-1.5 shadow-sm">
+                           <Timer size={10} strokeWidth={4} className="animate-spin-slow" />
+                           <span className="text-[9px] font-black uppercase tracking-widest leading-none">预热发放中</span>
+                        </div>
+                      )}
+                      
+                      <div className={cn("space-y-1", c.start_time && new Date(c.start_time) > new Date() && "mt-1.5")}>
                         <div className="flex items-start justify-between">
                           <h3 className="font-black text-[17px] text-slate-900 leading-[1.2] tracking-tight truncate pr-2 flex-1 group-hover:text-orange-600 transition-colors">
                             {c.title}
@@ -466,24 +559,39 @@ export default function CouponsPage() {
                         </div>
                       </div>
 
-                      {/* 统计迷你条 */}
-                      <div className="space-y-2 mt-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <div className="size-1.5 rounded-full bg-orange-500 animate-pulse" />
-                            <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">核销概览</span>
+                      {/* 统计迷你条 / 倒计时 */}
+                      {c.start_time && new Date(c.start_time) > new Date() ? (
+                        <div className="flex items-center justify-between mt-3 py-2.5 px-4 rounded-2xl bg-gradient-to-r from-violet-50 to-indigo-50/30 border border-violet-100/50 shadow-inner">
+                           <div className="flex flex-col">
+                             <div className="flex items-center gap-1.5 mb-0.5">
+                               <Timer size={12} className="text-violet-500" />
+                               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">生效倒计时</span>
+                             </div>
+                             <LiveCountdown targetDate={new Date(c.start_time)} onEnd={loadData} />
+                           </div>
+                           <div className="size-8 rounded-full bg-violet-100 flex items-center justify-center">
+                              <Timer size={16} className="text-violet-600 animate-pulse" />
+                           </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 mt-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <div className="size-1.5 rounded-full bg-orange-500 animate-pulse" />
+                              <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">核销概览</span>
+                            </div>
+                            <span className="text-[12px] font-black text-slate-900 tabular-nums">{usageRate.toFixed(1)}%</span>
                           </div>
-                          <span className="text-[12px] font-black text-slate-900 tabular-nums">{usageRate.toFixed(1)}%</span>
+                          <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex gap-0.5">
+                            <div className="h-full bg-orange-500" style={{ width: `${usageRate}%` }} />
+                            <div className="h-full bg-amber-400" style={{ width: `${((stats.pending as number) / (c.total_quantity || 100)) * 100}%` }} />
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-tighter">
+                            <span className="flex items-center gap-1"><Ticket size={12} strokeWidth={2.5} /> {stats.used}/{c.total_quantity || '∞'} 已用</span>
+                            <span className="flex items-center gap-1"><Users size={12} strokeWidth={2.5} /> {c.claimed_count} 人领取</span>
+                          </div>
                         </div>
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex gap-0.5">
-                          <div className="h-full bg-orange-500" style={{ width: `${usageRate}%` }} />
-                          <div className="h-full bg-amber-400" style={{ width: `${(stats.pending / (c.total_quantity || 100)) * 100}%` }} />
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-tighter">
-                          <span className="flex items-center gap-1"><Ticket size={12} strokeWidth={2.5} /> {stats.used}/{c.total_quantity || '∞'} 已用</span>
-                          <span className="flex items-center gap-1"><Users size={12} strokeWidth={2.5} /> {c.claimed_count} 人领取</span>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -497,13 +605,11 @@ export default function CouponsPage() {
       <Dialog open={showForm} onOpenChange={(open) => { if (!open) { setShowForm(false); setViewingCoupon(null); } }}>
         <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden border-none rounded-[24px] shadow-2xl bg-slate-50 [&>button]:hidden">
           
-          {/* 固定在顶部的 Header（不随内容滚动），模仿 Orders/Menu 的紧凑风格 */}
           <div className="bg-white px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0 relative z-10">
             <h3 className="font-black text-[17px] text-slate-900 flex items-center gap-2">
               <Gift className="text-orange-500" size={18} />
               {viewingCoupon ? "卡券详情回顾" : "发行新优惠券"}
             </h3>
-            {/* 使用普通的 close icon 定位在右侧 */}
             <Button size="icon" variant="ghost" className="size-8 text-slate-400 rounded-full hover:bg-slate-100" onClick={() => { setShowForm(false); setViewingCoupon(null); }}>
               <X size={18} />
             </Button>
@@ -535,6 +641,7 @@ export default function CouponsPage() {
                                   placeholder="例: 5"
                                   className="h-12 text-lg font-bold rounded-2xl border-white bg-white shadow-sm focus-visible:ring-orange-500 placeholder:text-sm placeholder:font-normal placeholder:text-slate-400" 
                                   {...field}
+                                  value={field.value ?? ''}
                                   onChange={e => field.onChange(e.target.value === '' ? '' : Number(e.target.value))}
                                 />
                               </FormControl>
@@ -556,6 +663,7 @@ export default function CouponsPage() {
                                   placeholder="例: 30 (0为无门槛)"
                                   className="h-12 text-lg font-bold rounded-2xl border-white bg-white shadow-sm focus-visible:ring-orange-500 placeholder:text-sm placeholder:font-normal placeholder:text-slate-400" 
                                   {...field}
+                                  value={field.value ?? ''}
                                   onChange={e => field.onChange(e.target.value === '' ? '' : Number(e.target.value))}
                                 />
                               </FormControl>
@@ -572,7 +680,7 @@ export default function CouponsPage() {
                             <FormLabel className="text-[10px] font-black text-slate-500 uppercase tracking-tighter ml-1">卡券名称</FormLabel>
                             <FormControl>
                               <Input 
-                                placeholder="例如：六月店庆红包" 
+                                placeholder="给卡券起个名字，如：新客专享红包" 
                                 className="h-12 font-medium rounded-2xl border-white bg-white shadow-sm focus-visible:ring-orange-500 placeholder:text-sm placeholder:font-normal placeholder:text-slate-400" 
                                 {...field}
                               />
@@ -599,10 +707,14 @@ export default function CouponsPage() {
                                 <Calendar size={10} /> 有效期 (天)
                               </FormLabel>
                               <FormControl>
-                                <Input 
+                                 <Input 
                                   type="number" 
-                                  className="h-11 rounded-xl font-bold border-slate-100" 
+                                  inputMode="numeric"
+                                  placeholder="必填天数 (例: 7)"
+                                  className="h-11 rounded-xl font-bold border-slate-100 placeholder:text-sm placeholder:font-normal placeholder:text-slate-400" 
                                   {...field}
+                                  value={field.value ?? ''}
+                                  onChange={e => field.onChange(e.target.value === '' ? '' : Number(e.target.value))}
                                 />
                               </FormControl>
                               <FormMessage className="text-[10px] ml-1" />
@@ -635,16 +747,17 @@ export default function CouponsPage() {
                             render={({ field }) => (
                               <FormItem className="space-y-0">
                                 <FormControl>
-                                  <Input 
+                                   <Input 
                                     type="number" 
-                                    placeholder={isUnlimited ? "∞ 不限量发放" : "份数"}
+                                    placeholder={isUnlimited ? "∞ 不限量发放" : "必填发行数量"}
                                     disabled={isUnlimited}
                                     className={cn(
-                                      "h-11 rounded-xl font-bold border-slate-100 placeholder:text-sm transition-all",
+                                      "h-11 rounded-xl font-bold border-slate-100 placeholder:text-sm placeholder:font-normal placeholder:text-slate-400 transition-all",
                                       isUnlimited && "bg-slate-50 text-slate-300 italic font-medium opacity-50"
                                     )}
                                     {...field}
                                     value={field.value ?? ''}
+                                    onChange={e => field.onChange(e.target.value === '' ? '' : Number(e.target.value))}
                                   />
                                 </FormControl>
                                 <FormMessage className="text-[10px] ml-1 mt-1" />
@@ -653,7 +766,58 @@ export default function CouponsPage() {
                           />
                         </div>
                       </div>
-                  </div>
+                      
+                      {/* 定时生效开关和选择器 */}
+                      <FormField
+                        control={form.control}
+                        name="start_time"
+                        render={({ field }) => (
+                          <FormItem className="space-y-3 p-4 rounded-2xl bg-violet-50/50 border border-violet-100">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="size-9 bg-violet-100 rounded-xl flex items-center justify-center text-violet-600">
+                                  <Timer size={18} />
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-black text-violet-950">定时生效</span>
+                                  <span className="text-[10px] text-violet-400 font-bold leading-none">指定卡券自动激活的时间</span>
+                                </div>
+                              </div>
+                              <FormControl>
+                                <Switch 
+                                  checked={!!field.value}
+                                  onCheckedChange={(checked) => field.onChange(checked ? new Date() : null)}
+                                  className="data-[state=checked]:bg-violet-500"
+                                />
+                              </FormControl>
+                            </div>
+                            
+                            {field.value && (
+                              <div className="animate-in slide-in-from-top-2 duration-300 pt-2 space-y-3">
+                                <BusinessDateTimePicker 
+                                  value={field.value}
+                                  onChange={field.onChange}
+                                  merchant={merchant}
+                                  disabledDates={disabledDates}
+                                  placeholder="选择生效日期"
+                                  minTimeBuffer={0} 
+                                  onHolidaySelect={(name, duration) => {
+                                    // 自动设置节日推荐有效期并通知商户
+                                    form.setValue('expiry_days', String(duration));
+                                    toast(`✨ ${name}：有效期已设为 ${duration}天`, "info");
+                                  }}
+                                />
+                                <div className="px-3 py-2 bg-violet-100/50 rounded-xl">
+                                  <p className="text-[10px] text-violet-600 font-black uppercase tracking-wider text-center">
+                                    卡券将在 {format(field.value, "PPP p", { locale: zhCN })} 准时生效
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                          </FormItem>
+                        )}
+                      />
+                    </div>
 
                     <div className="flex flex-col gap-3">
                       <div className="flex items-center gap-2 px-1 mb-1">
@@ -711,14 +875,12 @@ export default function CouponsPage() {
                       />
                     </div>
 
-                    {/* 适用对象 */}
                     <div className="space-y-4 pb-2">
                       <div className="flex items-center gap-2 px-1">
                         <span className="text-[11px] font-black text-slate-400">定向推广券</span>
                         <Separator className="flex-1 opacity-50" />
                       </div>
 
-                      {/* 范围选择器 */}
                       <FormField
                         control={control}
                         name="target_type"
@@ -750,13 +912,28 @@ export default function CouponsPage() {
                         )}
                       />
 
-                      {/* 定向菜品具体选择 (Scrollable) */}
                       {targetType === 'category' && (
                         <div className="space-y-2">
-                          <Card className="border-none shadow-none ring-1 ring-slate-100 rounded-2xl overflow-hidden">
-                            <div className="h-48 overflow-y-auto overscroll-contain custom-scrollbar">
-                              <div className="divide-y divide-slate-50">
-                                {categories.map(cat => {
+                          {categories.length === 0 ? (
+                            <div className="p-8 border border-dashed border-slate-200 rounded-3xl bg-slate-50 flex flex-col items-center justify-center space-y-4">
+                              <div className="size-16 rounded-[24px] bg-white shadow-sm flex items-center justify-center text-slate-300">
+                                <Tag size={32} />
+                              </div>
+                              <div className="text-center">
+                                <p className="text-xs font-black text-slate-900 tracking-tight">暂未发现菜品数据</p>
+                                <p className="text-[10px] text-slate-400 font-bold mt-1">需先添加菜品才能设置定向券</p>
+                              </div>
+                              <Link href="/menu">
+                                <Button size="sm" variant="outline" className="h-9 rounded-full border-slate-900 bg-slate-900 text-white font-black text-[11px] px-6 hover:bg-slate-800">
+                                  去添加菜品 (加个菜)
+                                </Button>
+                              </Link>
+                            </div>
+                          ) : (
+                            <Card className="border-none shadow-none ring-1 ring-slate-100 rounded-2xl overflow-hidden">
+                              <div className="h-48 overflow-y-auto overscroll-contain custom-scrollbar">
+                                <div className="divide-y divide-slate-50">
+                                  {categories.map(cat => {
                                   const catState = getCatState(cat.id, targetItemIds)
                                   const isExpanded = expandedCats.has(cat.id)
                                   const itemsInCat = menuItems.filter(i => i.category_id === cat.id)
@@ -795,80 +972,106 @@ export default function CouponsPage() {
                                         </div>
                                       )}
                                     </div>
-                                  )
-                                })}
-                              </div>
-                            </div>
-                          </Card>
-                          {errors.target_item_ids?.message && (
-                            <p className="text-[10px] ml-1 text-rose-500 font-bold">
-                              {errors.target_item_ids?.message.toString()}
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* 定向用户具体选择 */}
-                      {targetType === 'customer' && (
-                        <div className="space-y-3">
-                          <div className="relative group">
-                              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
-                              <Input 
-                                placeholder="寻找特定用户..." 
-                                className="h-11 pl-10 rounded-xl"
-                               value={custSearch}
-                                onChange={e => setCustSearch(e.target.value)}
-                              />
-                          </div>
- 
-                          {targetCustomerIds.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 min-h-6">
-                              {targetCustomerIds.map(id => {
-                                const c = customers.find(cu => cu.id === id)
-                                return c && (
-                                  <Badge key={id} variant="secondary" className="bg-orange-50 text-orange-600 font-black text-[9px] py-0 px-2 h-5 border-none rounded-full flex gap-1 items-center">
-                                    {c.name}
-                                    <X size={10} className="hover:text-orange-800 cursor-pointer" onClick={() => {
-                                        const current = getValues('target_customer_ids') ?? []
-                                        setValue('target_customer_ids', current.filter(x => x !== id))
-                                    }} />
-                                  </Badge>
-                                )
+                                );
                               })}
                             </div>
-                          )}
- 
-                          <div className="space-y-2">
-                            <Card className="border-none shadow-none ring-1 ring-slate-100 rounded-2xl overflow-hidden">
-                              <div className="h-40 overflow-y-auto overscroll-contain custom-scrollbar">
-                                <div className="p-1 space-y-0.5">
-                                  {filteredCustomers.map(cust => (
-                                    <div key={cust.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors text-left">
-                                      <Checkbox 
-                                        checked={targetCustomerIds.includes(cust.id)}
-                                        onCheckedChange={() => {
-                                            const current = getValues('target_customer_ids') ?? []
-                                            const ids = current.includes(cust.id)
-                                              ? current.filter(id => id !== cust.id)
-                                              : [...current, cust.id]
-                                            setValue('target_customer_ids', ids)
-                                        }}
-                                      />
-                                      <div className="flex flex-col">
-                                        <span className="text-[13px] font-bold text-slate-700">{cust.name}</span>
-                                        <span className="text-[10px] font-medium text-slate-400">{cust.phone}</span>
+                          </div>
+                        </Card>
+                      )}
+                      {errors.target_item_ids?.message && (
+                        <p className="text-[10px] ml-1 text-rose-500 font-bold">
+                          {errors.target_item_ids?.message.toString()}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                      {targetType === 'customer' && (
+                        <div className="space-y-3">
+                          {customers.length === 0 ? (
+                            <div className="p-8 border border-dashed border-slate-200 rounded-3xl bg-slate-50 flex flex-col items-center justify-center space-y-4">
+                              <div className="size-16 rounded-[24px] bg-white shadow-sm flex items-center justify-center text-slate-300">
+                                <Users size={32} />
+                              </div>
+                              <div className="text-center">
+                                <p className="text-xs font-black text-slate-900 tracking-tight">暂无活跃顾客</p>
+                                <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase tracking-wider">还没有用户下单哦 (系统将自动同步)</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="relative group">
+                                  <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
+                                  <Input 
+                                    placeholder="寻找特定用户..." 
+                                    className="h-11 pl-10 rounded-xl"
+                                   value={custSearch}
+                                    onChange={e => setCustSearch(e.target.value)}
+                                  />
+                              </div>
+
+                              {targetCustomerIds.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 min-h-6">
+                                  {targetCustomerIds.map(id => {
+                                    const c = customers.find(cu => cu.id === id)
+                                    return c && (
+                                      <Badge key={id} variant="secondary" className="bg-orange-50 text-orange-600 font-black text-[9px] py-0 px-2 h-5 border-none rounded-full flex gap-1 items-center">
+                                        {c.name}
+                                        <X size={10} className="cursor-pointer" onClick={() => {
+                                          const next = targetCustomerIds.filter(idx => idx !== id)
+                                          setValue('target_customer_ids', next)
+                                        }} />
+                                      </Badge>
+                                    )
+                                  })}
+                                </div>
+                              )}
+
+                              <div className="h-48 overflow-y-auto overscroll-contain custom-scrollbar space-y-1 pr-1">
+                                {filteredCustomers.map(c => (
+                                  <div 
+                                    key={c.id} 
+                                    className={cn(
+                                      "flex items-center justify-between p-3 rounded-2xl border transition-all cursor-pointer",
+                                      targetCustomerIds.includes(c.id) 
+                                        ? "bg-orange-50 border-orange-200 shadow-sm" 
+                                        : "bg-white border-slate-100 hover:border-orange-200"
+                                    )}
+                                    onClick={() => {
+                                      const next = targetCustomerIds.includes(c.id)
+                                        ? targetCustomerIds.filter(id => id !== c.id)
+                                        : [...targetCustomerIds, c.id]
+                                      setValue('target_customer_ids', next)
+                                    }}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <Avatar className="size-8 rounded-full">
+                                        <AvatarImage src={c.avatar_url || ''} />
+                                        <AvatarFallback className="bg-orange-100 text-orange-600 font-black text-[10px]">
+                                          {c.name.slice(0, 1)}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div className="flex flex-col text-left">
+                                        <span className="text-xs font-black text-slate-900 tracking-tight leading-none">{c.name}</span>
+                                        <span className="text-[10px] font-bold text-slate-400 mt-1">{c.phone}</span>
                                       </div>
                                     </div>
-                                  ))}
-                                </div>
+                                    <div className={cn(
+                                      "size-5 rounded-full flex items-center justify-center transition-all",
+                                      targetCustomerIds.includes(c.id) ? "bg-orange-500 text-white" : "bg-slate-100 text-slate-300"
+                                    )}>
+                                      <Check size={12} strokeWidth={3} />
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
-                            </Card>
-                            {errors.target_customer_ids?.message && (
-                              <p className="text-[10px] ml-1 text-rose-500 font-bold">
-                                {errors.target_customer_ids?.message.toString()}
-                              </p>
-                            )}
-                          </div>
+                            </>
+                          )}
+                          {errors.target_customer_ids?.message && (
+                            <p className="text-[10px] ml-1 text-rose-500 font-bold">
+                              {errors.target_customer_ids?.message.toString()}
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -892,7 +1095,6 @@ export default function CouponsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认 Dialog */}
       <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
         <DialogContent className="sm:max-w-[400px] p-8 pb-7 rounded-[32px] border-none shadow-2xl grid gap-6">
           <div className="flex flex-col items-center text-center space-y-4">
