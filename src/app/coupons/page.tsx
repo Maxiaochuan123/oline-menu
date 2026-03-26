@@ -87,6 +87,13 @@ function LiveCountdown({ targetDate, onEnd }: { targetDate: Date, onEnd?: () => 
   )
 }
 
+function getScheduledStartTime(startTime: string | null): Date | null {
+  if (!startTime) return null
+
+  const date = new Date(startTime)
+  return date > new Date() ? date : null
+}
+
 const couponSchema = z.object({
   title: z.string().min(1, "请输入卡券名称"),
   amount: z.any()
@@ -438,6 +445,7 @@ export default function CouponsPage() {
             {coupons.map((c) => {
               const stats = couponStats[c.id] || { used: 0, pending: 0, expired: 0 }
               const usageRate = c.claimed_count > 0 ? (stats.used / c.claimed_count) * 100 : 0
+              const scheduledStartTime = getScheduledStartTime(c.start_time)
               
               return (
                 <Card 
@@ -462,11 +470,9 @@ export default function CouponsPage() {
                       stackable: c.stackable,
                       total_quantity: c.total_quantity ?? (c.total_quantity === null ? '' : ''),
                       is_unlimited: c.total_quantity === null,
-                      // 判定逻辑：如果 start_time 和 created_at 很接近（1分钟内），我们就认为它没定过时，
-                      // 从而在查看详情时开关呈关闭状态。
-                      start_time: c.start_time && (new Date(c.start_time).getTime() - new Date(c.created_at).getTime() > 60000) 
-                        ? new Date(c.start_time) 
-                        : null
+                      // 详情回填和列表展示保持一致：只要 start_time 还在未来，就视为“定时生效”
+                      // 已过生效时间的券在详情里按已激活展示，避免同一张券出现列表显示预热、详情却显示非定时的状态分叉
+                      start_time: scheduledStartTime
                     });
 
                     if (c.target_type === 'category' && c.target_item_ids?.length) {
@@ -488,7 +494,7 @@ export default function CouponsPage() {
                     {/* 左侧面值装饰区 */}
                     <div className={cn(
                       "w-28 sm:w-32 py-5 flex flex-col items-center justify-center text-white shrink-0 relative transition-all duration-500 rounded-l-[24px]",
-                      c.start_time && new Date(c.start_time) > new Date() ? "bg-gradient-to-br from-violet-600 to-indigo-500 shadow-lg shadow-violet-100/50" :
+                      scheduledStartTime ? "bg-gradient-to-br from-violet-600 to-indigo-500 shadow-lg shadow-violet-100/50" :
                       c.target_type === 'all' ? "bg-gradient-to-r from-orange-600 to-orange-500" :
                       c.target_type === 'category' ? "bg-gradient-to-r from-indigo-600 to-indigo-500" :
                       "bg-gradient-to-r from-emerald-600 to-emerald-500"
@@ -513,14 +519,14 @@ export default function CouponsPage() {
 
                     {/* 右侧信息区 */}
                     <div className="flex-1 px-5 py-3.5 pb-5 flex flex-col justify-between bg-white relative">
-                      {c.start_time && new Date(c.start_time) > new Date() && (
+                      {scheduledStartTime && (
                         <div className="absolute top-0 right-0 px-3 py-1 bg-violet-600 text-white rounded-bl-2xl flex items-center gap-1.5 shadow-sm">
                            <Timer size={10} strokeWidth={4} className="animate-spin-slow" />
                            <span className="text-[9px] font-black uppercase tracking-widest leading-none">预热发放中</span>
                         </div>
                       )}
                       
-                      <div className={cn("space-y-1", c.start_time && new Date(c.start_time) > new Date() && "mt-1.5")}>
+                      <div className={cn("space-y-1", scheduledStartTime && "mt-1.5")}>
                         <div className="flex items-start justify-between">
                           <h3 className="font-black text-[17px] text-slate-900 leading-[1.2] tracking-tight truncate pr-2 flex-1 group-hover:text-orange-600 transition-colors">
                             {c.title}
@@ -560,14 +566,14 @@ export default function CouponsPage() {
                       </div>
 
                       {/* 统计迷你条 / 倒计时 */}
-                      {c.start_time && new Date(c.start_time) > new Date() ? (
+                      {scheduledStartTime ? (
                         <div className="flex items-center justify-between mt-3 py-2.5 px-4 rounded-2xl bg-gradient-to-r from-violet-50 to-indigo-50/30 border border-violet-100/50 shadow-inner">
                            <div className="flex flex-col">
                              <div className="flex items-center gap-1.5 mb-0.5">
                                <Timer size={12} className="text-violet-500" />
                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">生效倒计时</span>
                              </div>
-                             <LiveCountdown targetDate={new Date(c.start_time)} onEnd={loadData} />
+                              <LiveCountdown targetDate={scheduledStartTime} onEnd={loadData} />
                            </div>
                            <div className="size-8 rounded-full bg-violet-100 flex items-center justify-center">
                               <Timer size={16} className="text-violet-600 animate-pulse" />
