@@ -7,7 +7,7 @@
 -- 1. 扩展 orders 表，记录折扣明细
 -- ============================================
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS original_amount  DECIMAL(10,2) DEFAULT 0;  -- 折扣前原价
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS vip_discount_rate DECIMAL(4,2) DEFAULT 1.0; -- VIP 折扣率 (0.85 表示 85折)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS vip_discount_rate DECIMAL(4,2) DEFAULT 1.0; -- VIP 折扣率 (0.90 表示 90折)
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS vip_discount_amount DECIMAL(10,2) DEFAULT 0; -- VIP 减免金额
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_discount_amount DECIMAL(10,2) DEFAULT 0; -- 优惠券减免金额
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_id UUID;                              -- 使用的优惠券
@@ -87,13 +87,13 @@ BEGIN
 END $$;
 
 -- ============================================
--- 完成！VIP 等级规则（在前端代码中定义，无需数据库存储）
+-- 完成！VIP 等级规则（默认方案，支持商家自定义）
 -- 0   ~ 99   积分：原价     (1.0)  新客有 5 元优惠券
 -- 100 ~ 200  积分：98折  (0.98)
--- 201 ~ 500  积分：95折  (0.95)
--- 501 ~ 1000 积分：92折  (0.92)
--- 1001~ 3000 积分：88折  (0.88)
--- 3001+      积分：85折  (0.85)
+-- 201 ~ 500  积分：96折  (0.96)
+-- 501 ~ 1000 积分：94折  (0.94)
+-- 1001~ 3000 积分：92折  (0.92)
+-- 3001+      积分：90折  (0.90)
 -- ============================================
 
 -- 修正：让 customers.name 字段可空，以支持仅手机号完成登录

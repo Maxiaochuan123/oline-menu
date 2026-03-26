@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import type { Merchant, DisabledDate } from '@/lib/types'
-import { ArrowLeft, Upload, Trash2, Plus, Power, Store, Bell, Wallet, CalendarDays, CalendarIcon, Pencil } from 'lucide-react'
+import { ArrowLeft, Upload, Trash2, Plus, Power, Store, Bell, Wallet, CalendarDays, CalendarIcon, Pencil, Crown, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { format, eachDayOfInterval } from "date-fns"
@@ -138,7 +138,7 @@ export default function SettingsPage() {
         announcement,
         is_accepting_orders: isAccepting,
         payment_qr_urls: { wechat: wechatUrl, alipay: alipayUrl },
-        business_hours: { is_enabled: isAutoOpen, open_time: openTime, close_time: closeTime }
+        business_hours: { is_enabled: isAutoOpen, open_time: openTime, close_time: closeTime },
       }).eq('id', merchant.id)
 
       if (error) throw error
@@ -421,6 +421,35 @@ export default function SettingsPage() {
                  </CardContent>
                </Card>
           </div>
+        </section>
+
+        <section className="space-y-4">
+          <div className="flex items-center gap-4 px-1">
+            <div className="flex size-8 items-center justify-center rounded-full bg-amber-500 text-white">
+              <Crown size={16} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-black tracking-tight text-slate-800">会员等级</span>
+              <span className="text-[11px] font-bold text-slate-400">独立管理会员等级、升级积分与折扣策略</span>
+            </div>
+          </div>
+
+          <Link href="/membership">
+            <Card className="rounded-[2rem] border-none bg-white shadow-sm ring-1 ring-amber-100 transition-all active:scale-[0.98]">
+              <CardContent className="flex items-center justify-between gap-4 p-6">
+                <div className="flex items-center gap-4">
+                  <div className="flex size-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 shadow-inner">
+                    <Crown size={22} />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-base font-black text-slate-900">会员等级模块</span>
+                    <span className="text-[12px] font-bold text-slate-400">进入独立页面配置等级数量、折扣和升级积分</span>
+                  </div>
+                </div>
+                <ChevronRight size={18} className="text-slate-300" />
+              </CardContent>
+            </Card>
+          </Link>
         </section>
 
         {/* 不接单日期 */}

@@ -7,8 +7,17 @@ export interface Merchant {
   payment_qr_url: string | null
   payment_qr_urls: { wechat?: string; alipay?: string } | null
   business_hours: { is_enabled: boolean; open_time: string; close_time: string } | null
+  membership_levels?: MembershipTierConfig[] | null
   rating?: number | null
   created_at: string
+}
+
+export interface MembershipTierConfig {
+  id: string
+  name: string
+  rate: number
+  minPoints: number
+  color?: string
 }
 
 export interface Category {

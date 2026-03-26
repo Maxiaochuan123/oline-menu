@@ -9,9 +9,22 @@ import type { Merchant, Order } from '@/lib/types'
 import { formatPrice, speak, lastFourDigits, cn } from '@/lib/utils'
 import {
   Menu, X, LogOut, UtensilsCrossed, ClipboardList, Users,
-  ChefHat, TrendingUp, Clock, Settings, MessageSquare, Tag,
-  Star
+   ChefHat, TrendingUp, Clock, Settings, MessageSquare, Tag,
+   Star, Crown
 } from 'lucide-react'
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import Link from 'next/link'
 import OrderManagerModal from '@/components/OrderManagerModal'
 import OrderCard from '@/components/OrderCard'
@@ -19,7 +32,6 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Separator } from "@/components/ui/separator"
 import CopyButton from '@/components/common/CopyButton'
 
 export default function DashboardPage() {
@@ -31,6 +43,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [unreadMsgCount, setUnreadMsgCount] = useState(0)
   const [pendingAfterSalesCount, setPendingAfterSalesCount] = useState(0)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   // 订单详情状态 (复用外部组件)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
@@ -188,7 +201,6 @@ export default function DashboardPage() {
   const pendingCount = todayOrders.filter(o => o.status === 'pending' || o.after_sales_status === 'pending').length
 
   const NAV_ITEMS = [
-    { href: '/menu', icon: <UtensilsCrossed size={22} className="text-orange-500" />, bg: 'bg-orange-50', label: '菜单管理', desc: '管理菜品和分类' },
     { 
       href: '/orders', 
       icon: <ClipboardList size={22} className="text-blue-500" />, 
@@ -197,17 +209,19 @@ export default function DashboardPage() {
       desc: '查看和处理订单',
       badge: pendingAfterSalesCount > 0 ? `待售后 (${pendingAfterSalesCount})` : null
     },
-    { href: '/customers', icon: <Users size={22} className="text-emerald-500" />, bg: 'bg-emerald-50', label: '客户管理', desc: '客户信息和积分' },
-    { href: '/settings', icon: <Settings size={22} className="text-purple-500" />, bg: 'bg-purple-50', label: '店铺设置', desc: '接单控制、收款码' },
-    { href: '/coupons', icon: <Tag size={22} className="text-amber-500" />, bg: 'bg-amber-50', label: '优惠券', desc: '创建和管理优惠券' },
+    { href: '/menu', icon: <UtensilsCrossed size={22} className="text-orange-500" />, bg: 'bg-orange-50', label: '菜单管理', desc: '管理菜品和分类' },
     { 
       href: '/messages', 
       icon: <MessageSquare size={22} className="text-rose-500" />, 
       bg: 'bg-rose-50', 
       label: '客户消息', 
-      desc: '评论与留言',
+      desc: '评论与留言互动',
       count: unreadMsgCount
     },
+    { href: '/customers', icon: <Users size={22} className="text-emerald-500" />, bg: 'bg-emerald-50', label: '客户管理', desc: '客户画像与积分' },
+    { href: '/membership', icon: <Crown size={22} className="text-amber-500" />, bg: 'bg-amber-50', label: '会员等级', desc: '特权、积分与折扣' },
+    { href: '/coupons', icon: <Tag size={22} className="text-sky-500" />, bg: 'bg-sky-50', label: '优惠券', desc: '营销拉新促活工具' },
+    { href: '/settings', icon: <Settings size={22} className="text-slate-500" />, bg: 'bg-slate-50', label: '店铺设置', desc: '基础信息与接单控制' },
   ]
 
   return (
@@ -369,56 +383,121 @@ export default function DashboardPage() {
 
       </main>
 
-      {/* 侧边栏菜单 (手写适配) */}
-      {sidebarOpen && (
-        <>
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 transition-opacity" onClick={() => setSidebarOpen(false)} />
-          <div className="fixed top-0 left-0 h-full w-[280px] bg-white shadow-2xl z-50 p-6 flex flex-col font-sans animate-in slide-in-from-left duration-300">
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center gap-2">
-                <div className="size-8 bg-orange-500 rounded-lg flex items-center justify-center shrink-0">
-                  <ChefHat size={18} className="text-white" />
-                </div>
-                <span className="font-black text-slate-900 truncate max-w-[160px]">{merchant?.shop_name}</span>
+      {/* 侧边栏菜单 (定制化 Sheet 组件库 - 紧凑版) */}
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side="left" className="w-[256px] border-none p-0 flex flex-col font-sans bg-white shadow-2xl [&>button]:hidden">
+          {/* 定制 Header */}
+          <div className="flex items-center justify-between px-6 py-8 pb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="size-9 bg-orange-500 rounded-xl flex items-center justify-center shrink-0 shadow-lg shadow-orange-100/50">
+                <ChefHat size={18} className="text-white" />
               </div>
-              <Button variant="ghost" size="icon-sm" onClick={() => setSidebarOpen(false)} className="rounded-full active:bg-slate-100 shrink-0">
-                <X size={20} className="text-slate-500" />
-              </Button>
+              <SheetTitle className="font-black text-[16px] text-slate-800 truncate max-w-[130px]">
+                {merchant?.shop_name}
+              </SheetTitle>
             </div>
+            <Button 
+              variant="ghost" 
+              size="icon-sm" 
+              onClick={() => setSidebarOpen(false)} 
+              className="rounded-full bg-slate-50 hover:bg-slate-100 active:scale-90 transition-all shrink-0 size-8"
+            >
+              <X size={16} className="text-slate-500" />
+            </Button>
+          </div>
 
-            <ScrollArea className="flex-1 -mx-4 px-4 overflow-y-auto">
-              <nav className="space-y-1">
-                {[
-                  { href: '/dashboard', icon: <TrendingUp size={18} />, label: '仪表盘' },
-                  { href: '/menu', icon: <UtensilsCrossed size={18} />, label: '菜单管理' },
-                  { href: '/orders', icon: <ClipboardList size={18} />, label: '订单管理' },
-                  { href: '/customers', icon: <Users size={18} />, label: '客户管理' },
-                  { href: '/coupons', icon: <Tag size={18} />, label: '优惠券' },
-                  { href: '/settings', icon: <Settings size={18} />, label: '店铺设置' },
-                ].map(item => (
-                  <Link key={item.href} href={item.href} className="no-underline">
-                    <div className="flex items-center gap-3 px-4 py-3.5 rounded-xl active:bg-slate-50 transition-colors group">
-                      <div className="text-slate-400 group-active:text-orange-500 transition-colors">{item.icon}</div>
-                      <span className="font-bold text-slate-700 group-active:text-slate-900">{item.label}</span>
+          {/* 导航区域 */}
+          <ScrollArea className="flex-1 px-4 mt-2">
+            <nav className="space-y-1 pb-20">
+              {[
+                { href: '/orders', icon: <ClipboardList size={20} className="text-blue-500" />, bg: 'bg-blue-50', label: '订单管理' },
+                { href: '/menu', icon: <UtensilsCrossed size={20} className="text-orange-500" />, bg: 'bg-orange-50', label: '菜单管理' },
+                { href: '/messages', icon: <MessageSquare size={20} className="text-rose-500" />, bg: 'bg-rose-50', label: '客户消息', count: unreadMsgCount },
+                { type: 'separator' },
+                { href: '/customers', icon: <Users size={20} className="text-emerald-500" />, bg: 'bg-emerald-50', label: '客户管理' },
+                { href: '/membership', icon: <Crown size={20} className="text-amber-500" />, bg: 'bg-amber-50', label: '会员等级' },
+                { href: '/coupons', icon: <Tag size={20} className="text-sky-500" />, bg: 'bg-sky-50', label: '优惠券' },
+                { type: 'separator' },
+                { href: '/settings', icon: <Settings size={20} className="text-slate-500" />, bg: 'bg-slate-50', label: '店铺设置' },
+              ].map((item, idx) => (
+                item.type === 'separator' ? (
+                  <div key={`sep-${idx}`} className="py-1 px-3">
+                    <div className="h-px bg-slate-100/60 w-full" />
+                  </div>
+                ) : (
+                  <Link 
+                    key={item.href} 
+                    href={item.href || '#'} 
+                    className="no-underline block group"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <div className="flex items-center justify-between px-3 py-2.5 rounded-2xl group-active:bg-slate-100/70 transition-all duration-200">
+                      <div className="flex items-center gap-3">
+                        <div className={cn("size-9 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105", item.bg)}>
+                          {item.icon}
+                        </div>
+                        <span className="font-bold text-slate-600 group-active:text-slate-900 text-sm">{item.label}</span>
+                      </div>
+                      {item.count !== undefined && item.count > 0 && (
+                        <div className="size-5 rounded-full bg-rose-500 flex items-center justify-center text-[10px] font-black text-white shadow-lg shadow-rose-100">
+                          {item.count}
+                        </div>
+                      )}
                     </div>
                   </Link>
-                ))}
-              </nav>
-            </ScrollArea>
+                )
+              ))}
+            </nav>
+          </ScrollArea>
 
-            <Separator className="my-6 opacity-50" />
-            
+          {/* 底部退出按钮 (红色警示风格) */}
+          <div className="p-4 pt-4 pb-8 bg-white border-t border-slate-50">
             <Button 
               variant="outline" 
-              className="mt-auto w-full flex items-center justify-center gap-2 border-slate-100 text-rose-500 active:bg-rose-50 active:border-rose-100 font-black h-12 transition-all rounded-xl"
-              onClick={handleLogout}
+              className="w-full h-12 flex items-center justify-center gap-2.5 border-none bg-rose-50/50 hover:bg-rose-500 hover:text-white text-rose-500 font-bold transition-all rounded-[1rem] active:scale-[0.97]"
+              onClick={() => setShowLogoutConfirm(true)}
             >
-              <LogOut size={16} />
+              <div className="size-8 bg-white/80 rounded-lg shadow-sm flex items-center justify-center">
+                <LogOut size={16} />
+              </div>
               退出登录
             </Button>
           </div>
-        </>
-      )}
+        </SheetContent>
+      </Sheet>
+
+      {/* 退出登录二次确认 */}
+      <AlertDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+        <AlertDialogContent className="max-w-[340px] border-none rounded-[24px] p-0 overflow-hidden shadow-2xl bg-white">
+          <div className="relative p-6 pt-10 flex flex-col items-center text-center">
+            {/* 装饰性背景 */}
+            <div className="absolute -right-6 -top-6 size-32 bg-rose-50/40 blur-2xl" />
+            
+            <div className="relative mb-6 flex size-16 items-center justify-center rounded-[20px] bg-rose-50 text-rose-600 shadow-inner ring-8 ring-rose-50/30">
+              <LogOut size={32} />
+            </div>
+            
+            <AlertDialogTitle className="text-xl font-black text-slate-900 tracking-tight">确认退出登录？</AlertDialogTitle>
+            
+            <div className="mt-4 px-1">
+              <AlertDialogDescription className="text-[14px] font-medium leading-relaxed text-slate-500">
+                退出后将无法为您实时播放<span className="font-bold text-rose-600 mx-0.5">新订单语音提醒</span>。
+              </AlertDialogDescription>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 p-6 pt-0">
+            <AlertDialogAction
+              className="h-12 rounded-[18px] bg-rose-600 font-black text-white shadow-lg shadow-rose-100 hover:bg-rose-700 transition-all active:scale-95 border-none"
+              onClick={handleLogout}
+            >
+              确认退出
+            </AlertDialogAction>
+            <AlertDialogCancel className="h-12 border-none bg-slate-50 font-bold text-slate-500 hover:bg-slate-100 transition-all active:scale-95 rounded-[18px]">
+              取消
+            </AlertDialogCancel>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 详情弹窗 */}
       {selectedOrder && (

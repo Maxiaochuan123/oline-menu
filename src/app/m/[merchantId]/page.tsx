@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef, use } from 'react'
+import { useState, useEffect, useRef, use, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Merchant, Category, MenuItem, CartItem, Order, UserCoupon, Coupon, DisabledDate } from '@/lib/types'
 import { formatPrice, isWechat, isValidPhone, cn } from '@/lib/utils'
-import { calcDiscount, getVipLevel, VIP_LEVELS, getPointsToNextLevel, getCouponEligibleAmount } from '@/lib/membership'
+import { calcDiscount, getVipLevel, getMembershipLevels, getPointsToNextLevel, getCouponEligibleAmount } from '@/lib/membership'
 import { useDraggableSticky } from '@/hooks/useDraggableSticky'
 import { 
   Plus, Minus, ShoppingBag, Search, ChevronRight, X, Clock, MapPin, Phone, User, Star, Gift, Sparkles, UserRound, Briefcase, Calendar as CalendarIcon, Crown, CheckCircle, ArrowRight, Package
@@ -114,6 +114,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const [isBagShaking, setIsBagShaking] = useState(false)
   const bagRef = useRef<HTMLDivElement>(null)
   const nextBallId = useRef(0)
+  const membershipLevels = useMemo(() => getMembershipLevels(merchant?.membership_levels), [merchant?.membership_levels])
 
   const itemsRef = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -533,13 +534,14 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       amount: uc.coupon?.amount ?? 0,
       minSpend: uc.coupon?.min_spend ?? 0,
     })),
+    membershipLevels,
   })
   const finalAmount = discountResult.finalAmount
   const vipLevel = discountResult.vipLevel
   const vipDiscountAmount = discountResult.vipDiscountAmount
 
   // 动态计算底部区域高度（用于给菜单列表留出充足的 paddingBottom，避免遮挡最后几个菜）
-  const nextLevelInfo = getPointsToNextLevel(customerPoints + Math.floor(totalAmount));
+  const nextLevelInfo = getPointsToNextLevel(customerPoints + Math.floor(totalAmount), membershipLevels);
   const discountRowCount = totalCount > 0 ? [
     vipLevel.rate < 1 || !!nextLevelInfo, // VIP+等级进度行
     !!(selectedCoupons.length > 0 && discountResult.couponDiscountAmount > 0), // 优惠券行
@@ -915,7 +917,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         <div className="fixed bottom-[calc(66px+env(safe-area-inset-bottom,0px))] left-0 right-0 z-20 bg-slate-900/95 backdrop-blur-md pt-3.5 px-4 pb-4 flex flex-col gap-2.5 border-t border-white/10 shadow-[0_-4px_12px_rgba(0,0,0,0.4)]">
           {(() => {
             const currentTotalPts = customerPoints + Math.floor(totalAmount);
-            const nextLevelInfo = getPointsToNextLevel(currentTotalPts);
+            const nextLevelInfo = getPointsToNextLevel(currentTotalPts, membershipLevels);
             
             return (
               <>
@@ -1408,7 +1410,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 {/* 结算页升级提醒（临单提醒） */}
                 {(() => {
                   const currentTotalPts = customerPoints + Math.floor(totalAmount);
-                  const nextLevelInfo = getPointsToNextLevel(currentTotalPts);
+                  const nextLevelInfo = getPointsToNextLevel(currentTotalPts, membershipLevels);
                   if (nextLevelInfo && nextLevelInfo.needed <= 50) { 
                     return (
                       <div 
@@ -1609,9 +1611,9 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
               </div>
 
               <div className="space-y-3">
-                {VIP_LEVELS.slice(1).map(lv => {
+                {membershipLevels.slice(1).map(lv => {
                   const potentialPoints = customerPoints + Math.floor(totalAmount)
-                  const targetLevel = getVipLevel(potentialPoints)
+                  const targetLevel = getVipLevel(potentialPoints, membershipLevels)
                   const isTargetLevel = targetLevel.level === lv.level
                   const isPastLevel = targetLevel.level > lv.level
                   
