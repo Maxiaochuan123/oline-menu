@@ -2,17 +2,17 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import type { Message, Order } from '@/lib/types'
-import { ArrowLeft, MessageSquare, Send, User, Phone, X, ShoppingBag } from 'lucide-react'
-import { MessageBubble } from '@/components/common/MessageBubble'
+import { ArrowLeft, MessageSquare, User, Phone, X, ShoppingBag } from 'lucide-react'
+import { ChatView } from '@/components/common/ChatView'
 import OrderManagerModal from '@/components/OrderManagerModal'
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
+
 
 interface MessageGroup {
   order_id: string
@@ -33,17 +33,6 @@ export default function MessagesPage() {
   const [showOrderModal, setShowOrderModal] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [sending, setSending] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
-
-  useEffect(() => {
-    if (selectedGroup) {
-      setTimeout(scrollToBottom, 100)
-    }
-  }, [selectedGroup?.messages])
 
   const loadMessages = useCallback(async (mid: string) => {
     // 获取该商家所有消息，关联 orders 取客户信息
@@ -140,6 +129,7 @@ export default function MessagesPage() {
       sender: 'merchant',
       content: replyText.trim(),
       rating: null,
+      msg_type: 'normal',
       is_read_by_merchant: true,
       is_read_by_customer: false,
     })
@@ -289,43 +279,19 @@ export default function MessagesPage() {
               </div>
             </div>
 
-            {/* 消息列表 */}
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-              {selectedGroup.messages.map((msg, idx) => {
-                const prevMsg = idx > 0 ? selectedGroup.messages[idx - 1] : null
-                const showTime = !prevMsg || (new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() > 5 * 60 * 1000)
+            {/* 消息列表 + 输入区 */}
+            <ChatView
+              messages={selectedGroup.messages}
+              currentUserRole="merchant"
+              value={replyText}
+              onChange={setReplyText}
+              onSend={sendReply}
+              sending={sending}
+              placeholder="回复客户..."
+              scrollAreaClassName="flex-1"
+              showInput={!['pending', 'cancelled'].includes(selectedGroup.order.status)}
+            />
 
-                return (
-                  <MessageBubble key={msg.id} msg={msg} currentUserRole="merchant" showTime={showTime} />
-                )
-              })}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* 输入区 */}
-            <div className="bg-white border-t border-slate-100 p-3 pb-safe shrink-0">
-              <div className="flex items-end gap-2 bg-slate-50 rounded-3xl p-1.5 border border-slate-200/60 focus-within:border-orange-300 focus-within:ring-4 focus-within:ring-orange-500/10 transition-all">
-                <Textarea
-                  value={replyText}
-                  onChange={e => setReplyText(e.target.value)}
-                  placeholder="回复客户..."
-                  className="flex-1 min-h-[44px] max-h-[120px] bg-transparent border-none shadow-none resize-none py-3 px-4 text-[15px] placeholder:text-slate-400 focus-visible:ring-0"
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      sendReply()
-                    }
-                  }}
-                />
-                <Button
-                  onClick={sendReply}
-                  disabled={sending || !replyText.trim()}
-                  className="h-11 w-11 shrink-0 rounded-full bg-orange-500 hover:bg-orange-600 text-white shadow-md shadow-orange-200 transition-all active:scale-90 disabled:opacity-50 disabled:active:scale-100 p-0"
-                >
-                  {sending ? <div className="spinner size-4 border-2 border-white/30 border-t-white" /> : <Send size={18} className="ml-1" />}
-                </Button>
-              </div>
-            </div>
           </div>
         </div>
       )}

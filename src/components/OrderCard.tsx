@@ -25,6 +25,7 @@ interface OrderCardProps {
   order: Order
   isUrgent?: boolean
   isNewMessage?: boolean
+  newMessageCount?: number
   isNegotiating?: boolean
   showProgress?: boolean
   opacity?: number
@@ -36,6 +37,7 @@ export default function OrderCard({
   order,
   isUrgent = false,
   isNewMessage = false,
+  newMessageCount = 0,
   isNegotiating = false,
   showProgress = false,
   opacity = 1,
@@ -65,9 +67,14 @@ export default function OrderCard({
     
     if (isNewMessage) {
       return (
-        <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 text-white animate-bounce-slow font-black h-6 px-2">
-          新消息
-        </Badge>
+        <div className="relative h-6 min-w-[28px] flex items-center justify-center mr-0.5 transition-transform hover:scale-110 active:scale-95 group/msg">
+          <MessageCircle size={18} className="text-blue-500 opacity-90 transition-opacity group-hover/msg:opacity-100" strokeWidth={2.5} />
+          {newMessageCount > 0 && (
+             <span className="absolute -top-1 -right-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-blue-600 px-1 text-[8px] font-black text-white ring-2 ring-white shadow-sm animate-pulse">
+               {newMessageCount}
+             </span>
+          )}
+        </div>
       )
     }
     return null

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, use, useCallback } from 'react'
+import { useState, useEffect, use, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Order, Merchant, OrderItem, Message } from '@/lib/types'
@@ -56,6 +56,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
   // 取消原因
   const [cancelReason, setCancelReason] = useState('')
   const [usedCoupons, setUsedCoupons] = useState<UsedCoupon[]>([])
+  const pageScrollRef = useRef<HTMLElement | null>(null)
 
   const shouldShowRatingPanel = !!order && (
     order.status === 'completed' || 
@@ -114,6 +115,10 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
     const frame = requestAnimationFrame(() => loadData())
     return () => cancelAnimationFrame(frame)
   }, [loadData])
+
+  useEffect(() => {
+    pageScrollRef.current = document.scrollingElement as HTMLElement | null
+  }, [])
 
   useEffect(() => {
     const timer = setInterval(() => setTick(t => t + 1), 60000)
@@ -322,7 +327,14 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
         </div>
 
         {order && !['pending', 'cancelled'].includes(order.status) && (
-          <OrderChatBox messages={messages} onSendMessage={sendMessage} onQuickRating={handleQuickRating} shouldShowRatingPanel={shouldShowRatingPanel} sendingMsg={sendingMsg} />
+          <OrderChatBox
+            messages={messages}
+            onSendMessage={sendMessage}
+            onQuickRating={handleQuickRating}
+            shouldShowRatingPanel={shouldShowRatingPanel}
+            sendingMsg={sendingMsg}
+            scrollContainerRef={pageScrollRef}
+          />
         )}
       </div>
 

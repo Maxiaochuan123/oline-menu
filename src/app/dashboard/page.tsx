@@ -50,6 +50,7 @@ export default function DashboardPage() {
   
   // 订单标记状态
   const [unreadOrderIds, setUnreadOrderIds] = useState<Set<string>>(new Set())
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const [negotiatingOrderIds, setNegotiatingOrderIds] = useState<Set<string>>(new Set())
 
   const loadData = useCallback(async () => {
@@ -86,6 +87,14 @@ export default function DashboardPage() {
     
     setUnreadMsgCount(unreadMsgs?.length || 0)
     setUnreadOrderIds(new Set(unreadMsgs?.map(m => m.order_id) || []))
+    
+    // 计算每个订单的未读数
+    const counts: Record<string, number> = {}
+    unreadMsgs?.forEach(m => {
+      counts[m.order_id] = (counts[m.order_id] || 0) + 1
+    })
+    setUnreadCounts(counts)
+
     setNegotiatingOrderIds(new Set(
       unreadMsgs?.filter(m => m.msg_type === 'after_sales' || m.content.startsWith('【协商退单】') || m.content === '客户想和你协商退单')
         .map(m => m.order_id) || []
@@ -168,9 +177,14 @@ export default function DashboardPage() {
           const newMsg = payload.new as Record<string, unknown>
           if (newMsg.sender === 'customer') {
             setUnreadMsgCount(c => c + 1)
-            setUnreadOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id as string]))
+            const orderId = newMsg.order_id as string
+            setUnreadOrderIds(prev => new Set([...Array.from(prev), orderId]))
+            setUnreadCounts(prev => ({
+              ...prev,
+              [orderId]: (prev[orderId] || 0) + 1
+            }))
             if (newMsg.msg_type === 'after_sales' || (typeof newMsg.content === 'string' && newMsg.content.includes('协商退单'))) {
-              setNegotiatingOrderIds(prev => new Set([...Array.from(prev), newMsg.order_id as string]))
+              setNegotiatingOrderIds(prev => new Set([...Array.from(prev), orderId]))
             }
             speak('口讯口讯，有新留言啊！')
           }
@@ -203,8 +217,8 @@ export default function DashboardPage() {
   const NAV_ITEMS = [
     { 
       href: '/orders', 
-      icon: <ClipboardList size={22} className="text-blue-500" />, 
-      bg: 'bg-blue-50', 
+      icon: <ClipboardList size={22} className="text-indigo-500" />, 
+      bg: 'bg-indigo-50', 
       label: '订单管理', 
       desc: '查看和处理订单',
       badge: pendingAfterSalesCount > 0 ? `待售后 (${pendingAfterSalesCount})` : null
@@ -212,8 +226,8 @@ export default function DashboardPage() {
     { href: '/menu', icon: <UtensilsCrossed size={22} className="text-orange-500" />, bg: 'bg-orange-50', label: '菜单管理', desc: '管理菜品和分类' },
     { 
       href: '/messages', 
-      icon: <MessageSquare size={22} className="text-rose-500" />, 
-      bg: 'bg-rose-50', 
+      icon: <MessageSquare size={22} className="text-blue-500" />, 
+      bg: 'bg-blue-50', 
       label: '客户消息', 
       desc: '评论与留言互动',
       count: unreadMsgCount
@@ -310,7 +324,7 @@ export default function DashboardPage() {
               管理快捷入口
             </h2>
           </div>
-          <div className="flex gap-5 overflow-x-auto px-6 pb-6 snap-x no-scrollbar select-none">
+          <div className="flex gap-5 overflow-x-auto px-6 pt-5 pb-6 snap-x no-scrollbar select-none">
             {NAV_ITEMS.map((item) => (
               <Link key={item.href} href={item.href} className="group no-underline relative flex-shrink-0 snap-center">
                 <div className="flex flex-col items-center gap-3 transition-all duration-300 active:scale-95">
@@ -325,11 +339,11 @@ export default function DashboardPage() {
 
                   {/* 角标提醒 */}
                   {item.badge ? (
-                    <span className="absolute top-0 right-0 translate-x-1.5 -translate-y-1.5 flex h-5 min-w-[20px] animate-pulse items-center justify-center rounded-full bg-orange-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-lg shadow-orange-100">
+                    <span className="absolute top-0 right-0 translate-x-1.2 -translate-y-1.2 z-10 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-orange-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-lg shadow-orange-100 tag-pulse-red">
                       !
                     </span>
                   ) : (item.count !== undefined && item.count > 0) ? (
-                    <span className="absolute top-0 right-0 translate-x-1.5 -translate-y-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-lg shadow-rose-100">
+                    <span className="absolute top-0 right-0 translate-x-1.2 -translate-y-1.2 z-10 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-lg shadow-blue-100 tag-pulse-blue">
                       {item.count}
                     </span>
                   ) : null}
@@ -374,6 +388,7 @@ export default function DashboardPage() {
                   isUrgent={order.after_sales_status === 'pending' || negotiatingOrderIds.has(order.id)}
                   isNegotiating={negotiatingOrderIds.has(order.id)}
                   isNewMessage={unreadOrderIds.has(order.id)}
+                  newMessageCount={unreadCounts[order.id] || 0}
                   onClick={() => setSelectedOrder(order)}
                 />
               ))
@@ -410,9 +425,9 @@ export default function DashboardPage() {
           <ScrollArea className="flex-1 px-4 mt-2">
             <nav className="space-y-1 pb-20">
               {[
-                { href: '/orders', icon: <ClipboardList size={20} className="text-blue-500" />, bg: 'bg-blue-50', label: '订单管理' },
+                { href: '/orders', icon: <ClipboardList size={20} className="text-indigo-500" />, bg: 'bg-indigo-50', label: '订单管理' },
                 { href: '/menu', icon: <UtensilsCrossed size={20} className="text-orange-500" />, bg: 'bg-orange-50', label: '菜单管理' },
-                { href: '/messages', icon: <MessageSquare size={20} className="text-rose-500" />, bg: 'bg-rose-50', label: '客户消息', count: unreadMsgCount },
+                { href: '/messages', icon: <MessageSquare size={20} className="text-blue-500" />, bg: 'bg-blue-50', label: '客户消息', count: unreadMsgCount },
                 { type: 'separator' },
                 { href: '/customers', icon: <Users size={20} className="text-emerald-500" />, bg: 'bg-emerald-50', label: '客户管理' },
                 { href: '/membership', icon: <Crown size={20} className="text-amber-500" />, bg: 'bg-amber-50', label: '会员等级' },
