@@ -26,6 +26,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { cn } from '@/lib/utils'
+import { isSupportedImageFile } from '@/lib/image-upload'
 
 import { z } from "zod"
 import { useForm } from "react-hook-form"
@@ -239,7 +240,12 @@ export default function MenuPage() {
     if (itemImage) {
       const ext = itemImage.name.split('.').pop() || 'jpg'
       const fileName = `${merchant.id}/${Date.now()}.${ext}`
-      const { data: uploadData } = await supabase.storage.from('menu-images').upload(fileName, itemImage)
+      const { data: uploadData, error: uploadError } = await supabase.storage.from('menu-images').upload(fileName, itemImage)
+      if (uploadError) {
+        toast('图片上传失败: ' + uploadError.message, 'error')
+        setSaving(false)
+        return
+      }
       if (uploadData) {
         const { data: urlData } = supabase.storage.from('menu-images').getPublicUrl(uploadData.path)
         imageUrl = urlData.publicUrl
@@ -317,7 +323,7 @@ export default function MenuPage() {
             <h1 className="text-base font-black tracking-tight leading-none">菜单管理</h1>
           </div>
         </div>
-        <Button size="sm" onClick={() => openItemForm(undefined, activeCategory || undefined)} className="bg-orange-500 hover:bg-orange-600 font-black rounded-xl gap-1.5 shadow-lg shadow-orange-100">
+        <Button size="sm" data-testid="menu-add-item-button" onClick={() => openItemForm(undefined, activeCategory || undefined)} className="bg-orange-500 hover:bg-orange-600 font-black rounded-xl gap-1.5 shadow-lg shadow-orange-100">
           <Plus size={16} strokeWidth={3} />
           添加菜品
         </Button>
@@ -331,6 +337,7 @@ export default function MenuPage() {
             <span className="text-[11px] font-black uppercase tracking-tight">菜品分类</span>
           </div>
           <button 
+            data-testid="menu-category-manager-open"
             onClick={() => setShowCatManager(true)}
             className="text-[11px] font-black text-slate-400 hover:text-orange-500 uppercase tracking-tight flex items-center gap-1.5 py-1 px-2 rounded-lg bg-slate-50 transition-all border border-slate-100/50 active:scale-95"
           >
@@ -390,7 +397,8 @@ export default function MenuPage() {
           <div className="grid grid-cols-1 gap-4">
             {filteredItems.map(item => (
               <div 
-                key={item.id} 
+                key={item.id}
+                data-testid={`menu-item-card-${item.id}`}
                 className={cn(
                   "group relative bg-white rounded-[2rem] p-4 flex gap-5 transition-all duration-500 hover:shadow-2xl hover:shadow-orange-100/50 hover:-translate-y-1 border border-slate-100",
                   !item.is_available && "opacity-60 saturate-[0.5]"
@@ -439,6 +447,7 @@ export default function MenuPage() {
                        <h3 className="font-black text-slate-900 text-lg tracking-tight truncate">{item.name}</h3>
                        <div className="flex items-center gap-1">
                           <button 
+                            data-testid={`menu-item-toggle-${item.id}`}
                             onClick={() => toggleItemAvailable(item)}
                             className={cn(
                               "size-8 rounded-xl flex items-center justify-center transition-all active:scale-95",
@@ -447,10 +456,11 @@ export default function MenuPage() {
                           >
                             {item.is_available ? <Eye size={16} /> : <EyeOff size={16} />}
                           </button>
-                          <button 
-                            onClick={() => openItemForm(item)}
-                            className="size-8 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center active:bg-blue-100 active:scale-95 transition-all"
-                          >
+                            <button 
+                              data-testid={`menu-item-edit-${item.id}`}
+                              onClick={() => openItemForm(item)}
+                              className="size-8 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center active:bg-blue-100 active:scale-95 transition-all"
+                            >
                             <Pencil size={16} />
                           </button>
                            {!usedItemIds.has(item.id) && (
@@ -500,7 +510,7 @@ export default function MenuPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="py-4">
-            <Input 
+            <Input data-testid="menu-category-name-input"
               placeholder="例如：特惠午餐、招牌炒菜..." 
               value={catName} 
               onChange={e => setCatName(e.target.value)}
@@ -508,7 +518,8 @@ export default function MenuPage() {
             />
           </div>
           <DialogFooter>
-            <Button 
+            <Button
+              data-testid="menu-category-save"
               className="w-full h-12 rounded-2xl bg-orange-500 hover:bg-orange-600 font-black shadow-lg shadow-orange-100 gap-2"
               onClick={saveCategory}
               disabled={saving}
@@ -564,14 +575,19 @@ export default function MenuPage() {
                     </>
                   )}
                   <input 
+                    data-testid="menu-item-image-input"
                     type="file" 
                     accept="image/*" 
                     onChange={e => {
                       const file = e.target.files?.[0] || null
-                      if (file) {
-                         setItemImage(file)
-                         setItemImagePreview(URL.createObjectURL(file))
+                      if (!file) return
+                      if (!isSupportedImageFile(file)) {
+                        setItemImage(null)
+                        toast('请上传图片文件', 'warning')
+                        return
                       }
+                      setItemImage(file)
+                      setItemImagePreview(URL.createObjectURL(file))
                     }} 
                     className="absolute inset-0 opacity-0 cursor-pointer"
                   />
@@ -589,6 +605,7 @@ export default function MenuPage() {
                         <FormItem className="space-y-0 relative">
                           <FormControl>
                             <Input 
+                              data-testid="menu-item-name-input"
                               placeholder="菜品名称 *" 
                               className="h-11 rounded-2xl bg-slate-50 border-none font-black text-slate-800 placeholder:font-bold focus:ring-2 focus:ring-orange-500 transition-all" 
                               {...field} 
@@ -629,6 +646,7 @@ export default function MenuPage() {
                             <div className="relative">
                               <span className="absolute left-3 top-1/2 -translate-y-1/2 font-black text-orange-500 text-sm">¥</span>
                               <Input 
+                                data-testid="menu-item-price-input"
                                 type="number" 
                                 step="0.01" 
                                 placeholder="0.00" 
@@ -780,6 +798,7 @@ export default function MenuPage() {
                   )}
                 />
 
+                {/* eslint-disable-next-line react-hooks/incompatible-library */}
                 {itemForm.watch('is_new') && (
                   <div className="animate-in slide-in-from-top-2 duration-300 flex items-center justify-between px-1">
                     <Label className="text-[11px] font-black uppercase tracking-widest text-slate-400 block">新品截止日期</Label>
@@ -824,6 +843,7 @@ export default function MenuPage() {
 
           <DialogFooter className="mt-2 pb-0">
             <Button 
+              data-testid="menu-item-save-button"
               type="button"
               className="w-full h-14 rounded-3xl bg-slate-900 hover:bg-black font-black text-white gap-2 shadow-xl shadow-slate-200 transition-all active:scale-95"
               onClick={itemForm.handleSubmit(saveItem, onInvalid)}
@@ -849,7 +869,8 @@ export default function MenuPage() {
           
           <ScrollArea className="max-h-[60vh] px-6">
             <div className="space-y-2 pb-8 pt-2">
-              <Button 
+              <Button
+                data-testid="menu-category-create"
                 variant="outline" 
                 className="w-full h-14 rounded-2xl border-dashed border-slate-200 text-slate-400 hover:text-orange-500 hover:border-orange-200 hover:bg-orange-50 transition-all font-black gap-2 mb-4"
                 onClick={() => { setCatName(''); setEditingCategory(null); setShowCategoryForm(true) }}
@@ -865,10 +886,11 @@ export default function MenuPage() {
                       <span className="font-bold text-slate-700">{cat.name}</span>
                     </div>
                     <div className="flex items-center gap-1 opacity-100 transition-opacity">
-                      <button 
-                        onClick={() => { setEditingCategory(cat); setCatName(cat.name); setShowCategoryForm(true) }}
-                        className="size-9 rounded-xl flex items-center justify-center bg-blue-50 text-blue-500 active:bg-blue-100 transition-colors"
-                      >
+                        <button 
+                          data-testid={`menu-category-edit-${cat.id}`}
+                          onClick={() => { setEditingCategory(cat); setCatName(cat.name); setShowCategoryForm(true) }}
+                          className="size-9 rounded-xl flex items-center justify-center bg-blue-50 text-blue-500 active:bg-blue-100 transition-colors"
+                        >
                         <Pencil size={18} />
                       </button>
                       {!hasItems && (

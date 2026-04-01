@@ -262,6 +262,7 @@ export default function MessagesPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Button 
+                  data-testid="messages-view-order-button"
                   onClick={() => setShowOrderModal(true)}
                   variant="outline"
                   size="sm"

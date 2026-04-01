@@ -18,6 +18,7 @@ interface TimePickerProps {
   onDisabledSelect?: (time: string) => void
   disabledHours?: string[]
   className?: string
+  testIdPrefix?: string
 }
 
 export function TimePicker({ 
@@ -25,7 +26,8 @@ export function TimePicker({
   onChange, 
   isTimeDisabled, 
   onDisabledSelect,
-  className 
+  className,
+  testIdPrefix,
 }: TimePickerProps) {
   const [isOpen, setIsOpen] = React.useState(false)
   const hourScrollRef = React.useRef<HTMLDivElement>(null)
@@ -77,6 +79,7 @@ export function TimePicker({
             variant="outline"
             role="combobox"
             aria-expanded={isOpen}
+            data-testid={testIdPrefix ? `${testIdPrefix}-trigger` : undefined}
             className={cn(
               "h-12 w-full justify-start gap-2.5 rounded-xl border-slate-100 bg-white px-4 font-bold text-slate-900 transition-all active:scale-95",
               className
@@ -103,6 +106,7 @@ export function TimePicker({
                   key={h}
                   variant="ghost"
                   data-active={isActive}
+                  data-testid={testIdPrefix ? `${testIdPrefix}-hour-${h}` : undefined}
                   className={cn(
                     "h-9 w-full rounded-lg text-sm font-bold transition-all",
                     isActive 
@@ -130,6 +134,7 @@ export function TimePicker({
                   key={m}
                   variant="ghost"
                   data-active={isActive}
+                  data-testid={testIdPrefix ? `${testIdPrefix}-minute-${m}` : undefined}
                   className={cn(
                     "h-9 w-full rounded-lg text-sm font-bold transition-all",
                     isActive 
@@ -149,6 +154,7 @@ export function TimePicker({
            <Button 
             variant="ghost" 
             size="sm" 
+            data-testid={testIdPrefix ? `${testIdPrefix}-confirm` : undefined}
             className="text-[10px] uppercase font-black tracking-widest text-slate-400 hover:text-slate-900 h-6"
             onClick={() => setIsOpen(false)}
            >

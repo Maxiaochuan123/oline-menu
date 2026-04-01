@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react'
+import { useState, createContext, useContext, ReactNode } from 'react'
 import { CheckCircle, AlertCircle, X, Info } from 'lucide-react'
 
 type ToastType = 'success' | 'error' | 'info' | 'warning'

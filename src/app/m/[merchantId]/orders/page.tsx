@@ -73,7 +73,7 @@ export default function CustomerOrdersPage({ params }: { params: Promise<{ merch
         </Link>
         <h1 className="text-base font-black text-slate-900 tracking-tight leading-none">我的订单</h1>
       </header>
-      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+      <div data-testid="customer-orders-empty-state" className="flex-1 flex flex-col items-center justify-center p-8 text-center">
         <div className="size-20 bg-slate-100 rounded-full flex items-center justify-center mb-5 ring-8 ring-slate-50">
           <User size={40} className="text-slate-300" />
         </div>
@@ -100,7 +100,7 @@ export default function CustomerOrdersPage({ params }: { params: Promise<{ merch
 
       <div className="p-4 max-w-2xl mx-auto">
         {orders.length === 0 ? (
-          <div className="text-center py-20 flex flex-col items-center">
+          <div data-testid="customer-orders-empty-state" className="text-center py-20 flex flex-col items-center">
             <div className="size-20 bg-slate-100 rounded-full flex items-center justify-center mb-5 ring-8 ring-slate-50">
               <ShoppingBag size={40} className="text-slate-300" />
             </div>
@@ -113,7 +113,7 @@ export default function CustomerOrdersPage({ params }: { params: Promise<{ merch
             </Link>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div data-testid="customer-orders-active-section" className="space-y-4">
             {orders.map(order => {
               const st = STATUS_MAP[order.status] || STATUS_MAP['pending']
               const items = order.order_items || []
@@ -124,6 +124,7 @@ export default function CustomerOrdersPage({ params }: { params: Promise<{ merch
               return (
                 <Link 
                   key={order.id} 
+                  data-testid={`customer-order-card-${order.id}`}
                   href={`/m/${merchantId}/order/${order.id}`}
                   className="block bg-white rounded-3xl p-5 shadow-sm border border-slate-100 active:scale-[0.98] transition-transform"
                 >

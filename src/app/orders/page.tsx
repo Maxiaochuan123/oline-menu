@@ -213,7 +213,8 @@ export default function OrdersPage() {
             )}>
               <CardContent className="p-0">
                 {/* 用户摘要头部 */}
-                <div 
+                <div
+                  data-testid={`orders-phone-group-${group.phone}`}
                   onClick={() => toggleExpand(group.phone)}
                   className="p-4 flex items-center gap-4 cursor-pointer hover:bg-slate-50/50 transition-colors"
                 >
@@ -250,6 +251,7 @@ export default function OrdersPage() {
                 {!isExpanded && (
                   <div className="px-4 pb-4">
                     <div 
+                      data-testid={`orders-latest-order-card-${group.latest.id}`}
                       onClick={() => openOrder(group.latest)}
                       className={cn(
                         "p-4 rounded-3xl border flex items-center justify-between group active:scale-[0.98] transition-all",
@@ -268,7 +270,7 @@ export default function OrdersPage() {
                           <span className="line-clamp-1">{group.latest.address}</span>
                         </div>
                       </div>
-                      <Button variant="ghost" size="sm" className="rounded-xl font-black text-orange-600 hover:bg-orange-100/50">
+                      <Button data-testid={`orders-open-detail-${group.latest.id}`} variant="ghost" size="sm" className="rounded-xl font-black text-orange-600 hover:bg-orange-100/50">
                         详情
                       </Button>
                     </div>
@@ -283,8 +285,9 @@ export default function OrdersPage() {
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">全量订单历史记录</span>
                     </div>
                     {group.orders.map(order => (
-                      <div 
+                      <div
                         key={order.id}
+                        data-testid={`orders-order-row-${order.id}`}
                         onClick={() => openOrder(order)}
                         className="flex items-center justify-between p-3.5 bg-slate-50/80 rounded-2xl hover:bg-slate-100 transition-colors cursor-pointer group"
                       >

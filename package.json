@@ -6,7 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test",
+    "test:e2e:core-base": "playwright test tests/e2e/smoke.spec.ts tests/e2e/login-flow.spec.ts tests/e2e/customer-orders-list.spec.ts tests/e2e/customer-order-lookup.spec.ts tests/e2e/scheduled-time.spec.ts tests/e2e/menu-management.spec.ts tests/e2e/settings-management.spec.ts tests/e2e/store-availability.spec.ts tests/e2e/stock-availability.spec.ts --workers=1 --retries=1 --trace=off",
+    "test:e2e:core-commerce": "playwright test tests/e2e/checkout-membership.spec.ts tests/e2e/coupon-management.spec.ts tests/e2e/coupon-claim-boundaries.spec.ts tests/e2e/coupon-claim-race.spec.ts tests/e2e/membership-management.spec.ts --workers=1 --retries=1 --trace=off",
+    "test:e2e:core-ops": "playwright test tests/e2e/auth-guards.spec.ts tests/e2e/messages-realtime.spec.ts tests/e2e/order-chat-interactions.spec.ts tests/e2e/order-detail-cta.spec.ts tests/e2e/order-manager-confirmations.spec.ts tests/e2e/order-manager-cta.spec.ts tests/e2e/order-manager-refund-panel.spec.ts tests/e2e/order-refund.spec.ts --workers=1 --retries=1 --trace=off",
+    "test:e2e:core": "npm run test:e2e:core-base && npm run test:e2e:core-commerce && npm run test:e2e:core-ops",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
@@ -33,6 +40,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

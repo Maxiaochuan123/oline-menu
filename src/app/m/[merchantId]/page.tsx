@@ -454,12 +454,28 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
   const totalAmount = cart.reduce((sum, item) => sum + item.menuItem.price * item.quantity, 0)
   const totalCount = cart.reduce((sum, item) => sum + item.quantity, 0)
 
+  function getEligibleAmount(coupon?: Coupon | null) {
+    if (!coupon) return 0
+    return getCouponEligibleAmount(coupon, cart)
+  }
+
+  function isCouponApplicable(coupon?: Coupon | null) {
+    if (!coupon) return false
+    const eligibleAmount = getEligibleAmount(coupon)
+    return eligibleAmount > 0 && eligibleAmount >= coupon.min_spend
+  }
+
   // 自动选择最优优惠券（最优非叠加券 + 所有可叠加券）
   useEffect(() => {
     if (availableCoupons.length === 0) return
     // 用户手动选过则不自动覆盖
     if (couponManuallySet) return
-    const eligible = availableCoupons.filter(uc => uc.coupon && getCouponEligibleAmount(uc.coupon, cart) >= uc.coupon.min_spend)
+    const eligible = availableCoupons.filter(uc => {
+      const coupon = uc.coupon
+      if (!coupon) return false
+      const eligibleAmount = getCouponEligibleAmount(coupon, cart)
+      return eligibleAmount > 0 && eligibleAmount >= coupon.min_spend
+    })
     const nonStackable = eligible.filter(uc => !uc.coupon?.stackable).sort((a, b) => (b.coupon?.amount ?? 0) - (a.coupon?.amount ?? 0))
     const stackable = eligible.filter(uc => uc.coupon?.stackable)
     const best: UserCoupon[] = []
@@ -479,7 +495,8 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       const coupon = uc.coupon
       if (!coupon) return false
       // 1. 金额未达标
-      if (getCouponEligibleAmount(coupon, cart) >= coupon.min_spend) return false
+      const eligibleAmount = getEligibleAmount(coupon)
+      if (eligibleAmount > 0 && eligibleAmount >= coupon.min_spend) return false
       // 2. 必须是：能叠加的券 OR 比当前非叠加券更优的券
       const isStackable = coupon.stackable
       const isBetterThanCurrent = coupon.amount > currentNonStackableAmount
@@ -487,13 +504,13 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     })
     if (unreached.length > 0) {
       unreached.sort((a, b) => {
-        const diffA = (a.coupon?.min_spend ?? 0) - getCouponEligibleAmount(a.coupon!, cart)
-        const diffB = (b.coupon?.min_spend ?? 0) - getCouponEligibleAmount(b.coupon!, cart)
+        const diffA = (a.coupon?.min_spend ?? 0) - getEligibleAmount(a.coupon)
+        const diffB = (b.coupon?.min_spend ?? 0) - getEligibleAmount(b.coupon)
         return diffA - diffB
       })
       const target = unreached[0]
       const coupon = target.coupon!
-      const eligibleAmount = getCouponEligibleAmount(coupon, cart)
+      const eligibleAmount = getEligibleAmount(coupon)
       const diff = coupon.min_spend - eligibleAmount
       const isTargeted = coupon.target_type && coupon.target_type !== 'all'
       
@@ -527,10 +544,39 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     return (b.coupon?.min_spend ?? 0) - (a.coupon?.min_spend ?? 0)
   })
 
+  const applicableSelectedCoupons = sortedSelectedCoupons.filter(uc => isCouponApplicable(uc.coupon))
+
+  function sortCouponsForCheckout(coupons: UserCoupon[]) {
+    return [...coupons].sort((a, b) => {
+      if (a.coupon?.stackable && !b.coupon?.stackable) return -1
+      if (!a.coupon?.stackable && b.coupon?.stackable) return 1
+      return (b.coupon?.min_spend ?? 0) - (a.coupon?.min_spend ?? 0)
+    })
+  }
+
+  function getApplicableCouponsForCheckout(coupons: UserCoupon[]) {
+    return sortCouponsForCheckout(coupons).filter((coupon) => isCouponApplicable(coupon.coupon))
+  }
+
+  function getSelectedCouponSignature(coupons: UserCoupon[]) {
+    return sortCouponsForCheckout(coupons)
+      .map((coupon) => JSON.stringify({
+        id: coupon.id,
+        couponId: coupon.coupon_id,
+        amount: coupon.coupon?.amount ?? 0,
+        minSpend: coupon.coupon?.min_spend ?? 0,
+        stackable: coupon.coupon?.stackable ?? false,
+        targetType: coupon.coupon?.target_type ?? 'all',
+        targetCategoryId: coupon.coupon?.target_category_id ?? null,
+        targetItemIds: coupon.coupon?.target_item_ids ?? [],
+      }))
+      .join('|')
+  }
+
   const discountResult = calcDiscount({
     originalAmount: totalAmount,
     points: customerPoints,
-    couponAmounts: sortedSelectedCoupons.map(uc => ({
+    couponAmounts: applicableSelectedCoupons.map(uc => ({
       amount: uc.coupon?.amount ?? 0,
       minSpend: uc.coupon?.min_spend ?? 0,
     })),
@@ -554,12 +600,235 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
     : 0;
   const bottomBarHeight = bottomAreaTotalHeight + 10; // 再额外多留 10px 呼吸感
 
+  function getStoreOpenStatus(
+    merchantSnapshot: Merchant | null,
+    disabledDateSnapshot: DisabledDate[],
+    scheduledAt?: Date,
+  ) {
+    if (!merchantSnapshot) return { isOpen: true as const }
+
+    if (merchantSnapshot.is_accepting_orders === false) {
+      return {
+        isOpen: false as const,
+        reason: 'merchant' as const,
+        msg: merchantSnapshot.announcement,
+      }
+    }
+
+    const targetDate = format(scheduledAt ?? new Date(), 'yyyy-MM-dd')
+    const matchedDisabledDate = disabledDateSnapshot.find((item) => item.disabled_date === targetDate)
+    if (matchedDisabledDate) {
+      return {
+        isOpen: false as const,
+        reason: 'disabled_date' as const,
+        msg: matchedDisabledDate.reason,
+      }
+    }
+
+    if (merchantSnapshot.business_hours?.is_enabled) {
+      const compareDate = scheduledAt ?? new Date()
+      const compareTime = format(compareDate, 'HH:mm')
+      const { open_time, close_time } = merchantSnapshot.business_hours
+
+      if (open_time && close_time && (compareTime < open_time || compareTime > close_time)) {
+        return {
+          isOpen: false as const,
+          reason: 'hours' as const,
+          open_time,
+          close_time,
+        }
+      }
+    }
+
+    return { isOpen: true as const }
+  }
+
+  function getStoreClosedToastMessage(
+    status: ReturnType<typeof getStoreOpenStatus>,
+  ) {
+    if (status.reason === 'merchant') {
+      return status.msg || '商家当前已暂停接单，请稍后再试'
+    }
+
+    if (status.reason === 'disabled_date') {
+      return status.msg || '所选日期暂不营业，请重新选择配送时间'
+    }
+
+    if (status.reason === 'hours') {
+      return `所选时间不在营业时段内（${status.open_time} - ${status.close_time}）`
+    }
+
+    return '当前暂时无法下单，请稍后再试'
+  }
+
+  async function refreshStoreOpenStatus(scheduledTime?: string) {
+    const [{ data: latestMerchant }, { data: latestDisabledDates }] = await Promise.all([
+      supabase.from('merchants').select('*').eq('id', merchantId).maybeSingle(),
+      supabase.from('disabled_dates').select('*').eq('merchant_id', merchantId),
+    ])
+
+    if (latestMerchant) {
+      setMerchant(latestMerchant)
+    }
+
+    if (latestDisabledDates) {
+      setDisabledDates(latestDisabledDates)
+    }
+
+    const scheduledAt = scheduledTime ? new Date(scheduledTime) : undefined
+    const merchantSnapshot = latestMerchant ?? merchant
+    const disabledDateSnapshot = latestDisabledDates ?? disabledDates
+
+    return {
+      merchantSnapshot,
+      disabledDateSnapshot,
+      status: getStoreOpenStatus(
+        merchantSnapshot,
+        disabledDateSnapshot,
+        scheduledAt,
+      ),
+    }
+  }
+
+  async function refreshCartAvailability() {
+    if (cart.length === 0) {
+      return {
+        isValid: true,
+        unavailableItems: [] as string[],
+      }
+    }
+
+    const cartItemIds = cart.map((item) => item.menuItem.id)
+    const { data: latestItems, error } = await supabase
+      .from('menu_items')
+      .select('*')
+      .eq('merchant_id', merchantId)
+      .in('id', cartItemIds)
+      .eq('is_available', true)
+
+    if (error) {
+      throw error
+    }
+
+    const latestAvailableItems = latestItems ?? []
+    const latestItemMap = new Map(latestAvailableItems.map((item) => [item.id, item]))
+    const unavailableItems = cart
+      .filter((item) => !latestItemMap.has(item.menuItem.id))
+      .map((item) => item.menuItem.name)
+
+    if (unavailableItems.length > 0) {
+      setCart((currentCart) =>
+        currentCart.flatMap((item) => {
+          const latestItem = latestItemMap.get(item.menuItem.id)
+          if (!latestItem) return []
+
+          return [{
+            ...item,
+            menuItem: latestItem,
+          }]
+        }),
+      )
+    }
+
+    return {
+      isValid: unavailableItems.length === 0,
+      unavailableItems,
+    }
+  }
+
+  async function refreshSelectedCouponAvailability() {
+    if (!customerId || selectedCoupons.length === 0) {
+      return {
+        isValid: true,
+        applicableCoupons: applicableSelectedCoupons,
+      }
+    }
+
+    const selectedCouponIds = selectedCoupons.map((coupon) => coupon.id)
+    const { data: latestCoupons, error } = await supabase
+      .from('user_coupons')
+      .select('*, coupon:coupons(*)')
+      .eq('customer_id', customerId)
+      .in('id', selectedCouponIds)
+
+    if (error) {
+      throw error
+    }
+
+    const validSelectedCoupons = (latestCoupons ?? []).filter((coupon) => (
+      coupon.status === 'unused' &&
+      new Date(coupon.expires_at) > new Date() &&
+      coupon.coupon?.status === 'active'
+    ))
+
+    const nextApplicableCoupons = getApplicableCouponsForCheckout(validSelectedCoupons)
+    const currentApplicableCoupons = getApplicableCouponsForCheckout(selectedCoupons)
+    const selectedIds = [...selectedCoupons.map((coupon) => coupon.id)].sort()
+    const nextApplicableIds = [...nextApplicableCoupons.map((coupon) => coupon.id)].sort()
+    const selectedStillValid =
+      validSelectedCoupons.length === selectedCoupons.length &&
+      JSON.stringify(selectedIds) === JSON.stringify(nextApplicableIds) &&
+      getSelectedCouponSignature(currentApplicableCoupons) === getSelectedCouponSignature(nextApplicableCoupons)
+
+    if (!selectedStillValid) {
+      setSelectedCoupons(nextApplicableCoupons)
+      if (formPhone) {
+        await loadCustomerBenefits(formPhone)
+      }
+    }
+
+    return {
+      isValid: selectedStillValid,
+      applicableCoupons: nextApplicableCoupons,
+    }
+  }
+
   async function onSubmit(values: OrderFormValues) {
     const { customerName, phone, address, scheduledTime } = values;
     setSubmitting(true)
 
+    let reservedCouponIds: string[] = []
+    let createdCustomerId: string | null = null
+    let previousCustomerSnapshot: {
+      id: string
+      points: number
+      order_count: number
+      total_spent: number
+    } | null = null
+    let createdOrderId: string | null = null
+
     try {
+      const { status: latestStoreStatus, merchantSnapshot } = await refreshStoreOpenStatus(scheduledTime)
+      if (!latestStoreStatus.isOpen) {
+        toast(getStoreClosedToastMessage(latestStoreStatus), 'warning')
+        return
+      }
+
+      const latestCartStatus = await refreshCartAvailability()
+      if (!latestCartStatus.isValid) {
+        setShowOrderForm(false)
+        setShowCart(true)
+        toast(`${latestCartStatus.unavailableItems.join('、')} 已下架，请重新确认购物车`, 'warning')
+        return
+      }
+
       // 1. 同步/创建客户信息
+      const latestCouponStatus = await refreshSelectedCouponAvailability()
+      if (!latestCouponStatus.isValid) {
+        toast('所选优惠券已失效，请重新确认订单金额', 'warning')
+        return
+      }
+
+      const nextDiscountResult = calcDiscount({
+        originalAmount: totalAmount,
+        points: customerPoints,
+        couponAmounts: latestCouponStatus.applicableCoupons.map((coupon) => ({
+          amount: coupon.coupon?.amount ?? 0,
+          minSpend: coupon.coupon?.min_spend ?? 0,
+        })),
+        membershipLevels: getMembershipLevels(merchantSnapshot?.membership_levels),
+      })
+
       let cid = customerId
       const { data: customerData } = await supabase
         .from('customers')
@@ -570,13 +839,53 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
       if (customerData) {
         cid = customerData.id
+        previousCustomerSnapshot = {
+          id: customerData.id,
+          points: customerData.points ?? 0,
+          order_count: (customerData as { order_count?: number | null }).order_count ?? 0,
+          total_spent: Number((customerData as { total_spent?: number | null }).total_spent ?? 0),
+        }
+      }
+
+      if (latestCouponStatus.applicableCoupons.length > 0) {
+        if (!cid) {
+          throw new Error('所选优惠券已失效，请重新确认订单金额')
+        }
+
+        const couponIdsToReserve = latestCouponStatus.applicableCoupons.map((coupon) => coupon.id)
+        const { data: reservedCoupons, error: reserveCouponsError } = await supabase
+          .from('user_coupons')
+          .update({ status: 'used', used_at: new Date().toISOString() })
+          .eq('customer_id', cid)
+          .eq('status', 'unused')
+          .in('id', couponIdsToReserve)
+          .select('id')
+
+        if (reserveCouponsError) {
+          throw reserveCouponsError
+        }
+
+        reservedCouponIds = (reservedCoupons ?? []).map((coupon) => coupon.id)
+        if (reservedCouponIds.length !== couponIdsToReserve.length) {
+          if (reservedCouponIds.length > 0) {
+            await supabase
+              .from('user_coupons')
+              .update({ status: 'unused', used_at: null })
+              .in('id', reservedCouponIds)
+          }
+
+          throw new Error('所选优惠券已失效，请重新确认订单金额')
+        }
+      }
+
+      if (customerData) {
         // 下单时同步常用信息和积分（每 1元 = 1积分）
         await supabase.from('customers').update({
           name: customerName,
           address,
-          points: (customerData.points ?? 0) + Math.floor(finalAmount),
-          order_count: (customerData as { order_count?: number }).order_count ?? 0 + 1,
-          total_spent: ((customerData as { total_spent?: number }).total_spent ?? 0) + finalAmount,
+          points: (customerData.points ?? 0) + Math.floor(nextDiscountResult.finalAmount),
+          order_count: ((customerData as { order_count?: number }).order_count ?? 0) + 1,
+          total_spent: ((customerData as { total_spent?: number }).total_spent ?? 0) + nextDiscountResult.finalAmount,
         }).eq('id', cid)
       } else {
         const { data: newCustomer } = await supabase
@@ -587,12 +896,13 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             phone,
             address,
             order_count: 1,
-            total_spent: finalAmount,
-            points: Math.floor(finalAmount),
+            total_spent: nextDiscountResult.finalAmount,
+            points: Math.floor(nextDiscountResult.finalAmount),
           })
           .select('id')
           .single()
         cid = newCustomer?.id ?? null
+        createdCustomerId = cid
       }
 
       // 保存信息到本地，下次自动带出
@@ -611,17 +921,18 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           scheduled_time: new Date(scheduledTime).toISOString(),
           // 金额字段
           original_amount: totalAmount,
-          total_amount: finalAmount,
-          vip_discount_rate: discountResult.vipLevel.rate,
-          vip_discount_amount: discountResult.vipDiscountAmount,
-          coupon_discount_amount: discountResult.couponDiscountAmount,
-          coupon_ids: sortedSelectedCoupons.map(c => c.coupon_id),
+          total_amount: nextDiscountResult.finalAmount,
+          vip_discount_rate: nextDiscountResult.vipLevel.rate,
+          vip_discount_amount: nextDiscountResult.vipDiscountAmount,
+          coupon_discount_amount: nextDiscountResult.couponDiscountAmount,
+          coupon_ids: latestCouponStatus.applicableCoupons.map(c => c.coupon_id),
           status: 'pending',
         })
         .select('id')
         .single()
 
       if (orderErr) throw orderErr
+      createdOrderId = order.id
 
       // 3. 创建订单项
       const orderItems = cart.map(item => ({
@@ -634,14 +945,6 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
       }))
       const { error: itemsErr } = await supabase.from('order_items').insert(orderItems)
       if (itemsErr) throw itemsErr
-
-      // 4. 标记优惠券已使用
-      if (selectedCoupons.length > 0) {
-        await supabase
-          .from('user_coupons')
-          .update({ status: 'used', used_at: new Date().toISOString() })
-          .in('id', selectedCoupons.map(c => c.id))
-      }
 
       setShowOrderForm(false)
       setCart([])
@@ -657,6 +960,28 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         router.push(`/m/${merchantId}/order/${order.id}`)
       }, 1500)
     } catch (err: unknown) {
+      if (createdOrderId) {
+        await supabase.from('order_items').delete().eq('order_id', createdOrderId)
+        await supabase.from('orders').delete().eq('id', createdOrderId)
+      }
+
+      if (createdCustomerId) {
+        await supabase.from('customers').delete().eq('id', createdCustomerId)
+      } else if (previousCustomerSnapshot) {
+        await supabase.from('customers').update({
+          points: previousCustomerSnapshot.points,
+          order_count: previousCustomerSnapshot.order_count,
+          total_spent: previousCustomerSnapshot.total_spent,
+        }).eq('id', previousCustomerSnapshot.id)
+      }
+
+      if (reservedCouponIds.length > 0) {
+        await supabase
+          .from('user_coupons')
+          .update({ status: 'unused', used_at: null })
+          .in('id', reservedCouponIds)
+      }
+
       const msg = err instanceof Error ? err.message : '下单失败'
       toast(`下单失败: ${msg}`, 'error')
     } finally {
@@ -666,27 +991,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
   // 校验营业状态
   const checkIsStoreOpen = () => {
-    if (!merchant) return { isOpen: true } // 初始加载中不拦截
-    
-    // 1. 手动强制关店优先级最高
-    if (merchant.is_accepting_orders === false) return { isOpen: false, reason: 'merchant' }
-    
-    // 2. 停业日期检查
-    const todayStr = format(new Date(), 'yyyy-MM-dd')
-    const disabledDate = disabledDates.find(d => d.disabled_date === todayStr)
-    if (disabledDate) return { isOpen: false, reason: 'disabled_date', msg: disabledDate.reason }
-    
-    // 3. 自动定时开启检查
-    if (merchant.business_hours?.is_enabled) {
-      const now = new Date()
-      const nowStr = format(now, 'HH:mm')
-      const { open_time, close_time } = merchant.business_hours
-      if (open_time && close_time && (nowStr < open_time || nowStr > close_time)) {
-        return { isOpen: false, reason: 'hours', open_time, close_time }
-      }
-    }
-    
-    return { isOpen: true }
+    return getStoreOpenStatus(merchant, disabledDates)
   }
 
   if (loading) return <MenuSkeleton />
@@ -697,18 +1002,28 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
   if (!openStatus.isOpen) {
     return (
-      <div className="overlay" style={{ background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        className="overlay"
+        data-testid="store-closed-overlay"
+        style={{ background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
         <div className="dialog" style={{ position: 'relative', top: 'auto', left: 'auto', transform: 'none', width: '85%', maxWidth: '320px', borderRadius: '24px' }}>
           <div style={{ textAlign: 'center', padding: '10px' }}>
             <div style={{ padding: '20px', background: '#fff7ed', borderRadius: '100px', width: 'fit-content', margin: '0 auto 20px' }}>
               <Clock size={40} color="#f97316" />
             </div>
             
-            <h2 style={{ fontSize: '20px', fontWeight: '800', marginBottom: '8px', color: '#1c1917' }}>
+            <h2
+              data-testid="store-closed-title"
+              style={{ fontSize: '20px', fontWeight: '800', marginBottom: '8px', color: '#1c1917' }}
+            >
               {openStatus.reason === 'hours' ? '尚未开始营业' : '暂停接单中'}
             </h2>
             
-            <p style={{ fontSize: '14px', color: '#78716c', marginBottom: '20px', lineHeight: '1.6' }}>
+            <p
+              data-testid="store-closed-message"
+              style={{ fontSize: '14px', color: '#78716c', marginBottom: '20px', lineHeight: '1.6' }}
+            >
               {openStatus.reason === 'hours' && `本店营业时间：${openStatus.open_time} - ${openStatus.close_time}`}
               {openStatus.reason === 'disabled_date' && (openStatus.msg || '今日店休')}
               {openStatus.reason === 'merchant' && (merchant?.announcement || '商家目前忙碌中，请稍后再来点餐~')}
@@ -849,7 +1164,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 </h3>
                 <div className="space-y-4">
                   {itemsInCat.map(item => (
-                    <div key={item.id} className="flex gap-3 relative group">
+                    <div key={item.id} data-testid={`menu-item-${item.id}`} className="flex gap-3 relative group">
                       <div className="relative shrink-0">
                         <div className="w-[88px] h-[88px] rounded-2xl bg-slate-100 overflow-hidden relative ring-1 ring-slate-100/50">
                           {item.image_url ? (
@@ -894,6 +1209,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                               </>
                             )}
                             <button 
+                              data-testid={`add-to-cart-${item.id}`}
                               onClick={(e) => addToCart(item, e)}
                               className="size-6 rounded-full bg-orange-500 flex items-center justify-center text-white active:scale-90 transition-transform shadow-md shadow-orange-200"
                             >
@@ -990,6 +1306,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
           <div className="flex items-center w-full px-4 py-3 pb-safe max-w-2xl mx-auto">
             <div
               ref={bagRef}
+              data-testid="cart-bag-button"
               className={cn(
                 "relative w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center -mt-8 border-[5px] border-slate-50 cursor-pointer shadow-lg z-10 transition-transform active:scale-95",
                 isBagShaking && "animate-shake-bounce"
@@ -1021,6 +1338,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             </div>
             
             <button
+              data-testid="checkout-button"
               className="bg-orange-500 text-white rounded-full px-6 py-2.5 text-sm font-black active:scale-95 transition-all shadow-[0_8px_20px_-6px_rgba(234,88,12,0.3)]"
               onClick={() => {
                 if (!customerId && newcomerCouponsCount > 0) {
@@ -1043,6 +1361,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         <>
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity animate-in fade-in" onClick={() => setShowCart(false)} />
           <div className="fixed bottom-0 left-0 right-0 max-w-2xl mx-auto bg-slate-50 rounded-t-[2rem] z-50 animate-in slide-in-from-bottom pb-safe shadow-2xl flex flex-col max-h-[85vh]">
+            <div data-testid="cart-modal" />
             <div className="px-5 py-4 flex justify-between items-center bg-white rounded-t-[2rem] border-b border-slate-100 shrink-0">
               <h3 className="font-black text-slate-900 text-lg">已选菜品</h3>
               <button onClick={() => setShowCart(false)} className="p-2 -mr-2 bg-slate-100 rounded-full text-slate-500 active:scale-90 transition-transform">
@@ -1052,13 +1371,13 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             
             <div className="flex-1 overflow-y-auto px-5 py-2 bg-white custom-scrollbar">
               <div className="flex justify-end pt-2 pb-3">
-                <button onClick={() => setCart([])} className="text-xs font-bold text-slate-400 flex items-center gap-1 active:text-rose-500 transition-colors">
+                <button data-testid="clear-cart-button" onClick={() => setCart([])} className="text-xs font-bold text-slate-400 flex items-center gap-1 active:text-rose-500 transition-colors">
                   清空购物车
                 </button>
               </div>
               <div className="space-y-4">
                 {cart.map(item => (
-                  <div key={item.menuItem.id} className="flex items-center gap-3">
+                  <div key={item.menuItem.id} data-testid={`cart-item-${item.menuItem.id}`} className="flex items-center gap-3">
                     <div className="w-14 h-14 rounded-2xl bg-slate-100 shrink-0 relative overflow-hidden">
                        {item.menuItem.image_url ? (
                          <div className="w-full h-full bg-center bg-cover" style={{ backgroundImage: `url(${item.menuItem.image_url})` }} />
@@ -1075,10 +1394,10 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <button onClick={() => removeFromCart(item.menuItem.id)} className="size-7 rounded-full border border-slate-200 bg-white flex items-center justify-center text-slate-600 active:scale-90 transition-transform shadow-sm">
+                      <button data-testid={`cart-remove-${item.menuItem.id}`} onClick={() => removeFromCart(item.menuItem.id)} className="size-7 rounded-full border border-slate-200 bg-white flex items-center justify-center text-slate-600 active:scale-90 transition-transform shadow-sm">
                         <Minus size={14} />
                       </button>
-                      <span className="text-[14px] font-black w-4 text-center">{item.quantity}</span>
+                      <span data-testid={`cart-quantity-${item.menuItem.id}`} className="text-[14px] font-black w-4 text-center">{item.quantity}</span>
                       <button onClick={() => addToCart(item.menuItem)} className="size-7 rounded-full bg-orange-500 flex items-center justify-center text-white active:scale-90 transition-transform shadow-[0_4px_12px_-2px_rgba(234,88,12,0.3)]">
                         <Plus size={14} strokeWidth={3} />
                       </button>
@@ -1093,7 +1412,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
               <div className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100/50 space-y-2.5">
                 <div className="flex justify-between items-center text-[13px]">
                   <span className="text-slate-500 font-medium">商品合计</span>
-                  <span className="font-black text-slate-700">¥{totalAmount.toFixed(2)}</span>
+                  <span data-testid="cart-total-amount" className="font-black text-slate-700">¥{totalAmount.toFixed(2)}</span>
                 </div>
 
                 {vipLevel.rate < 1 && (
@@ -1144,7 +1463,11 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
         <>
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity animate-in fade-in" onClick={() => setShowOrderForm(false)} />
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="fixed inset-0 z-50 bg-slate-50 flex flex-col animate-in slide-in-from-bottom duration-300">
+            <form
+              data-testid="order-form"
+              onSubmit={form.handleSubmit(onSubmit)}
+              className="fixed inset-0 z-50 bg-slate-50 flex flex-col animate-in slide-in-from-bottom duration-300"
+            >
               <header className="bg-white/80 backdrop-blur-md px-5 py-3 flex items-center justify-between border-b border-slate-100 shrink-0 sticky top-0 z-10">
                 <h3 className="font-black text-slate-900 text-lg">确认订单</h3>
                 <button type="button" onClick={() => setShowOrderForm(false)} className="p-2 -mr-2 bg-slate-100 rounded-full text-slate-500 active:scale-90 transition-transform">
@@ -1287,6 +1610,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                           {/* 1. 日期选择器 */}
                           <Popover>
                             <PopoverTrigger 
+                              data-testid="scheduled-date-trigger"
                               className={cn(
                                 buttonVariants({ variant: "outline" }),
                                 "w-full h-12 justify-start text-left font-bold rounded-2xl border-transparent bg-slate-50 transition-all hover:bg-slate-100 text-[14px] focus-visible:ring-4 focus-visible:ring-orange-500/10 focus-visible:border-orange-500 shadow-sm px-3",
@@ -1319,6 +1643,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                             onChange={setTime} 
                             isTimeDisabled={(t) => t < openTime || t > closeTime}
                             onDisabledSelect={() => toast(`不可选择非营业时间 (${openTime} - ${closeTime})`, 'warning')}
+                            testIdPrefix="scheduled-time"
                             className="w-full h-12 bg-slate-50 border-transparent text-[14px] rounded-2xl shadow-sm hover:bg-slate-100" 
                           />
                         </div>
@@ -1351,6 +1676,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
               {/* VIP 等级权益入口 */}
               <div
+                data-testid="vip-info-trigger"
                 onClick={() => setShowVipInfo(true)}
                 className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100 mb-5 cursor-pointer flex items-center justify-between active:scale-[0.98] transition-transform"
               >
@@ -1388,7 +1714,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 {/* 折扣明细 */}
                 <div className="space-y-2 mt-4 bg-slate-50 rounded-2xl p-3 border border-slate-100/50">
                   {discountResult.vipDiscountAmount > 0 && (
-                    <div className="flex justify-between text-[13px]">
+                    <div data-testid="checkout-coupon-discount-row" className="flex justify-between text-[13px]">
                       <span className="text-emerald-600 font-bold flex items-center gap-1"><Crown size={12} fill="currentColor"/> {vipLevel.label} {vipLevel.discount}</span>
                       <span className="text-emerald-600 font-black">-¥{formatPrice(discountResult.vipDiscountAmount).replace('¥', '')}</span>
                     </div>
@@ -1396,12 +1722,12 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                   {discountResult.couponDiscountAmount > 0 && (
                     <div className="flex justify-between text-[13px]">
                       <span className="text-amber-500 font-bold flex items-center gap-1"><Gift size={12} /> 优惠券扣减</span>
-                      <span className="text-amber-500 font-black">-¥{formatPrice(discountResult.couponDiscountAmount).replace('¥', '')}</span>
+                      <span data-testid="checkout-coupon-discount-amount" className="text-amber-500 font-black">-¥{formatPrice(discountResult.couponDiscountAmount).replace('¥', '')}</span>
                     </div>
                   )}
-                  <div className="flex justify-between items-end pt-3 mt-1 border-t border-dashed border-slate-200">
+                  <div data-testid="checkout-total-row" className="flex justify-between items-end pt-3 mt-1 border-t border-dashed border-slate-200">
                     <span className="font-black text-slate-800 text-sm">应付合计</span>
-                    <span className="text-orange-500 font-black text-xl leading-none">
+                    <span data-testid="checkout-total-amount" className="text-orange-500 font-black text-xl leading-none">
                       <span className="text-sm mr-0.5">¥</span>{finalAmount.toFixed(2)}
                     </span>
                   </div>
@@ -1431,6 +1757,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
               {/* 优惠券选择入口 */}
               {availableCoupons.length > 0 && (
                 <div
+                  data-testid="coupon-trigger"
                   className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100 mb-5 flex items-center justify-between cursor-pointer active:scale-[0.98] transition-transform"
                   onClick={() => setShowCouponPicker(true)}
                 >
@@ -1464,6 +1791,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
             <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-4 pb-safe z-20">
               <button 
+                data-testid="submit-order-button"
                 type="submit"
                 className="w-full bg-slate-900 text-white rounded-full h-[52px] text-[15px] font-black flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-70 disabled:scale-100 shadow-[0_12px_24px_-8px_rgba(15,23,42,0.25)]"
                 disabled={submitting}
@@ -1522,6 +1850,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
 
           <div className="flex flex-col gap-4">
             <button
+              data-testid="checkout-login-button"
               onClick={() => {
                 setShowCheckoutLoginPrompt(false)
                 setShowLoginModal(true)
@@ -1531,6 +1860,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
               去领券并登录
             </button>
             <button
+              data-testid="skip-login-checkout-button"
               onClick={() => {
                 setShowCheckoutLoginPrompt(false)
                 setShowOrderForm(true)
@@ -1563,6 +1893,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 <Phone size={12} className="text-orange-400" /> 手机号
               </label>
               <Input
+                data-testid="login-phone-input"
                 type="tel"
                 placeholder="请输入您的手机号"
                 value={loginPhone}
@@ -1574,6 +1905,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             </div>
 
             <button
+              data-testid="login-submit-button"
               type="submit"
               disabled={loginLoading}
               className="w-full h-14 bg-gradient-to-r from-orange-500 to-rose-500 text-white font-black text-base rounded-2xl active:scale-95 transition-all shadow-[0_8px_16px_-4px_rgba(234,88,12,0.4)] flex items-center justify-center -mb-2 hover:opacity-95 tracking-tight gap-2 disabled:opacity-50 disabled:shadow-none"
@@ -1828,8 +2160,9 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                 
                 return availableCoupons.map(uc => {
                   const minSpend = uc.coupon?.min_spend ?? 0
-                  const eligibleAmount = uc.coupon ? getCouponEligibleAmount(uc.coupon, cart) : totalAmount
-                  const disabled = eligibleAmount < minSpend
+                  const eligibleAmount = uc.coupon ? getEligibleAmount(uc.coupon) : totalAmount
+                  const isTargeted = !!(uc.coupon?.target_type && uc.coupon.target_type !== 'all')
+                  const disabled = eligibleAmount < minSpend || (isTargeted && eligibleAmount === 0)
                   const gap = minSpend - eligibleAmount
                   const isSelected = selectedCoupons.some(c => c.id === uc.id)
                   const isStackable = uc.coupon?.stackable ?? false
@@ -1859,7 +2192,9 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
                   }
 
                   return (
-                  <div key={uc.id}
+                  <div
+                    key={uc.id}
+                    data-testid={`coupon-option-${uc.id}`}
                     onClick={() => {
                       if (disabled) {
                         const isTargeted = uc.coupon?.target_type && uc.coupon.target_type !== 'all'
@@ -1921,6 +2256,7 @@ export default function ClientMenuPage({ params }: { params: Promise<{ merchantI
             {selectedCoupons.length > 0 && (
               <div style={{ flexShrink: 0 }}>
                 <button
+                  data-testid="coupon-picker-confirm"
                   onClick={() => setShowCouponPicker(false)}
                   className="btn btn-primary btn-block"
                 >确定（已选 {selectedCoupons.length} 张，省 ¥{selectedCoupons.reduce((s, c) => s + (c.coupon?.amount ?? 0), 0).toFixed(0)}）</button>

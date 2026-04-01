@@ -3,7 +3,7 @@
 import { useState, Suspense, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { UtensilsCrossed, Phone, Lock, Store, Eye, EyeOff, ArrowRight, Loader2, ChefHat, UserCircle2, ShieldCheck, X, IdCard } from 'lucide-react'
+import { Phone, Lock, Store, Eye, EyeOff, ArrowRight, Loader2, ChefHat, UserCircle2, ShieldCheck, X, IdCard } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -361,6 +361,7 @@ function MerchantLoginForm({ redirectTo }: { redirectTo: string }) {
             <div className="flex p-1 bg-slate-100 rounded-2xl mb-8">
               <button
                 type="button"
+                data-testid="login-tab-merchant"
                 onClick={() => { setIsRegister(false); form.reset(); }}
                 className={cn(
                   "flex-1 py-2.5 text-sm font-black transition-all rounded-xl",
@@ -371,6 +372,7 @@ function MerchantLoginForm({ redirectTo }: { redirectTo: string }) {
               </button>
               <button
                 type="button"
+                data-testid="merchant-register-toggle"
                 onClick={() => { setIsRegister(true); form.reset(); }}
                 className={cn(
                   "flex-1 py-2.5 text-sm font-black transition-all rounded-xl",
@@ -516,6 +518,7 @@ function MerchantLoginForm({ redirectTo }: { redirectTo: string }) {
 
                 <Button 
                   type="submit" 
+                  data-testid="merchant-auth-submit"
                   disabled={loading}
                   className="w-full h-14 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-black text-base shadow-lg shadow-slate-200 transition-all active:scale-[0.98] mt-4 flex items-center justify-center gap-2 group"
                 >

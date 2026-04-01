@@ -113,7 +113,6 @@ export default function DashboardPage() {
   }, [supabase, router])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData()
   }, [loadData])
 
@@ -281,7 +280,7 @@ export default function DashboardPage() {
               <div className="size-7 bg-blue-50/80 text-blue-500 rounded-lg flex items-center justify-center mb-1.5 text-blue-600">
                 <ClipboardList size={14} />
               </div>
-              <p className="text-[20px] font-black text-slate-900 leading-none tracking-tight">{todayOrders.length}</p>
+              <p data-testid="dashboard-today-orders-count" className="text-[20px] font-black text-slate-900 leading-none tracking-tight">{todayOrders.length}</p>
               <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">今日订单</p>
             </CardContent>
           </Card>
@@ -290,7 +289,7 @@ export default function DashboardPage() {
                <div className="size-7 bg-emerald-50/80 text-emerald-500 rounded-lg flex items-center justify-center mb-1.5">
                 <span className="font-black text-xs">¥</span>
               </div>
-              <p className="text-[18px] font-black text-emerald-600 leading-none tracking-tight">{formatPrice(todayRevenue).replace('¥', '')}</p>
+              <p data-testid="dashboard-today-revenue" className="text-[18px] font-black text-emerald-600 leading-none tracking-tight">{formatPrice(todayRevenue).replace('¥', '')}</p>
               <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-tight">今日营收</p>
             </CardContent>
           </Card>
@@ -308,7 +307,7 @@ export default function DashboardPage() {
               <p className={cn(
                 "text-[20px] font-black leading-none tracking-tight",
                 pendingCount > 0 ? "text-orange-600 animate-pulse" : "text-slate-400"
-              )}>{pendingCount}</p>
+              )} data-testid="dashboard-pending-count">{pendingCount}</p>
               <p className={cn(
                 "text-[10px] font-bold mt-1 uppercase tracking-tight",
                 pendingCount > 0 ? "text-orange-500" : "text-slate-400"
@@ -326,7 +325,12 @@ export default function DashboardPage() {
           </div>
           <div className="flex gap-5 overflow-x-auto px-6 pt-5 pb-6 snap-x no-scrollbar select-none">
             {NAV_ITEMS.map((item) => (
-              <Link key={item.href} href={item.href} className="group no-underline relative flex-shrink-0 snap-center">
+              <Link
+                key={item.href}
+                href={item.href}
+                data-testid={item.href === '/messages' ? 'dashboard-messages-link' : undefined}
+                className="group no-underline relative flex-shrink-0 snap-center"
+              >
                 <div className="flex flex-col items-center gap-3 transition-all duration-300 active:scale-95">
                   <div className="size-[64px] rounded-[1.5rem] bg-white flex items-center justify-center shrink-0 shadow-[0_4px_12px_rgba(0,0,0,0.03)] border border-slate-100 transition-all group-hover:shadow-lg group-hover:shadow-slate-200/50 group-hover:-translate-y-1">
                     <div className={cn("size-11 rounded-[1rem] flex items-center justify-center shrink-0 shadow-sm transition-transform", item.bg)}>
@@ -343,7 +347,10 @@ export default function DashboardPage() {
                       !
                     </span>
                   ) : (item.count !== undefined && item.count > 0) ? (
-                    <span className="absolute top-0 right-0 translate-x-1.2 -translate-y-1.2 z-10 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-lg shadow-blue-100 tag-pulse-blue">
+                    <span
+                      data-testid={item.href === '/messages' ? 'dashboard-messages-count' : undefined}
+                      className="absolute top-0 right-0 translate-x-1.2 -translate-y-1.2 z-10 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-black text-white ring-4 ring-white shadow-lg shadow-blue-100 tag-pulse-blue"
+                    >
                       {item.count}
                     </span>
                   ) : null}

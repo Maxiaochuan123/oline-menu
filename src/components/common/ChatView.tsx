@@ -21,6 +21,7 @@ interface ChatViewProps {
   emptyState?: ReactNode
   inputTopContent?: ReactNode
   scrollContainerRef?: RefObject<HTMLElement | null>
+  testIdPrefix?: string
 }
 
 export function ChatView({
@@ -37,6 +38,7 @@ export function ChatView({
   emptyState,
   inputTopContent,
   scrollContainerRef,
+  testIdPrefix,
 }: ChatViewProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
@@ -171,6 +173,7 @@ export function ChatView({
           <div className="flex items-end gap-2">
             <Textarea
               ref={textareaRef}
+              data-testid={testIdPrefix ? `${testIdPrefix}-input` : undefined}
               value={value}
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
@@ -180,6 +183,7 @@ export function ChatView({
               onFocus={scrollComposerIntoView}
             />
             <Button
+              data-testid={testIdPrefix ? `${testIdPrefix}-send` : undefined}
               onClick={() => {
                 onSend()
                 scrollComposerIntoView()

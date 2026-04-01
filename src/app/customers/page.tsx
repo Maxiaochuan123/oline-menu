@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import type { Merchant, Customer, Order } from '@/lib/types'
+import type { Customer, Order } from '@/lib/types'
 import { ArrowLeft, Search, Trophy, Phone, ShoppingBag, User, Crown, ChevronDown, ChevronUp, History, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent } from "@/components/ui/card"
@@ -18,7 +18,6 @@ import OrderManagerModal from '@/components/OrderManagerModal'
 export default function CustomersPage() {
   const supabase = createClient()
   const router = useRouter()
-  const [merchant, setMerchant] = useState<Merchant | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -32,7 +31,6 @@ export default function CustomersPage() {
     if (!user) { router.push('/login'); return }
     const { data: m } = await supabase.from('merchants').select('*').eq('user_id', user.id).single()
     if (!m) return
-    setMerchant(m)
     const { data: c } = await supabase.from('customers').select('*').eq('merchant_id', m.id).order('points', { ascending: false })
     setCustomers(c || [])
     setLoading(false)
@@ -221,6 +219,7 @@ export default function CustomersPage() {
                             {orders.map(order => (
                               <div 
                                 key={order.id}
+                                data-testid={`customer-order-row-${order.id}`}
                                 onClick={() => setSelectedOrder(order)}
                                 className="flex items-center justify-between p-3.5 bg-slate-50/80 rounded-2xl hover:bg-orange-50 hover:ring-1 hover:ring-orange-100 transition-all cursor-pointer group/item"
                               >

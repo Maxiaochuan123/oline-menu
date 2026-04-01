@@ -255,11 +255,6 @@ export default function CouponsPage() {
   }
 
   async function onSubmit(values: CouponFormValues) {
-    if (viewingCoupon) {
-      setShowForm(false);
-      setViewingCoupon(null);
-      return;
-    }
     if (!merchant) return
 
     const insertData: Record<string, unknown> = {
@@ -431,8 +426,10 @@ export default function CouponsPage() {
               </p>
             </div>
             <Button 
+              data-testid="coupon-open-create"
               onClick={() => {
                 reset({ title: '', amount: '' as unknown as number, min_spend: '' as unknown as number, expiry_days: 7, is_newcomer_reward: false, target_type: 'all', target_category_id: null, target_customer_ids: [], target_item_ids: [], stackable: false, total_quantity: 100, is_unlimited: false, start_time: null });
+                setViewingCoupon(null);
                 setShowForm(true);
               }}
               className="h-14 px-10 rounded-2xl bg-orange-600 hover:bg-orange-500 text-white font-black text-[15px] shadow-xl shadow-orange-100 transition-all active:scale-95 flex gap-2"
@@ -450,6 +447,7 @@ export default function CouponsPage() {
               return (
                 <Card 
                   key={c.id} 
+                  data-testid={`coupon-card-${c.id}`}
                   className={cn(
                     "group relative transition-all duration-300 hover:shadow-[0_20px_40px_rgba(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] cursor-pointer",
                     "rounded-[24px] border-none p-0 bg-white shadow-sm ring-1 ring-black/5",
@@ -533,6 +531,7 @@ export default function CouponsPage() {
                           </h3>
                           <div className="flex items-center gap-1.5 shrink-0 ml-1">
                             <button 
+                                data-testid={`coupon-toggle-${c.id}`}
                                 className={cn(
                                     "size-8 rounded-xl flex items-center justify-center transition-all active:scale-95",
                                     c.status === 'active' ? "text-emerald-500 bg-emerald-50 active:bg-emerald-100" : "text-slate-400 bg-slate-50 active:bg-slate-100"
@@ -609,7 +608,7 @@ export default function CouponsPage() {
 
       {/* 创建/详情 Dialog */}
       <Dialog open={showForm} onOpenChange={(open) => { if (!open) { setShowForm(false); setViewingCoupon(null); } }}>
-        <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden border-none rounded-[24px] shadow-2xl bg-slate-50 [&>button]:hidden">
+        <DialogContent data-testid="coupon-form-dialog" className="sm:max-w-[480px] p-0 overflow-hidden border-none rounded-[24px] shadow-2xl bg-slate-50 [&>button]:hidden">
           
           <div className="bg-white px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0 relative z-10">
             <h3 className="font-black text-[17px] text-slate-900 flex items-center gap-2">
@@ -641,6 +640,7 @@ export default function CouponsPage() {
                               <FormLabel className="text-[10px] font-black text-slate-500 uppercase tracking-tighter ml-1">抵扣面额 (¥)</FormLabel>
                               <FormControl>
                                 <Input 
+                                  data-testid="coupon-amount-input"
                                   type="number" 
                                   pattern="[0-9]*"
                                   inputMode="decimal"
@@ -663,6 +663,7 @@ export default function CouponsPage() {
                               <FormLabel className="text-[10px] font-black text-slate-500 uppercase tracking-tighter ml-1">消费门槛 (¥)</FormLabel>
                               <FormControl>
                                 <Input 
+                                  data-testid="coupon-min-spend-input"
                                   type="number" 
                                   pattern="[0-9]*"
                                   inputMode="decimal"
@@ -871,6 +872,7 @@ export default function CouponsPage() {
                             </div>
                             <FormControl>
                               <Switch 
+                                data-testid="coupon-stackable-switch"
                                 checked={field.value}
                                 onCheckedChange={field.onChange}
                                 className="data-[state=checked]:bg-violet-500 shadow-sm scale-110"
@@ -899,6 +901,7 @@ export default function CouponsPage() {
                             ].map((btn) => (
                               <button
                                 key={btn.id}
+                                data-testid={`coupon-target-type-${btn.id}`}
                                 type="button"
                                 onClick={() => field.onChange(btn.id)}
                                 className={cn(
@@ -947,6 +950,7 @@ export default function CouponsPage() {
                                     <div key={cat.id} className="text-left">
                                       <div className="flex items-center gap-3 p-3 bg-slate-50/30">
                                         <Checkbox 
+                                          data-testid={`coupon-target-category-${cat.id}`}
                                           checked={catState === 'all' || catState === 'partial'}
                                           onCheckedChange={() => toggleCategory(cat.id)}
                                         />
@@ -968,6 +972,7 @@ export default function CouponsPage() {
                                           {itemsInCat.map(item => (
                                             <div key={item.id} className="flex items-center gap-3 py-2.5 px-3 pl-10 border-b border-slate-50 transition-colors hover:bg-orange-50/30">
                                               <Checkbox 
+                                                  data-testid={`coupon-target-item-${item.id}`}
                                                   checked={targetItemIds.includes(item.id)}
                                                   onCheckedChange={() => toggleItem(item.id)}
                                               />
@@ -1091,7 +1096,7 @@ export default function CouponsPage() {
                     我知道了
                   </Button>
                 ) : (
-                  <Button type="submit" className="w-full h-12 rounded-[14px] bg-slate-900 font-black text-[15px] shadow-sm transition-transform active:scale-95">
+                  <Button data-testid="coupon-save-button" type="submit" className="w-full h-12 rounded-[14px] bg-slate-900 font-black text-[15px] shadow-sm transition-transform active:scale-95">
                     确认发行
                   </Button>
                 )}

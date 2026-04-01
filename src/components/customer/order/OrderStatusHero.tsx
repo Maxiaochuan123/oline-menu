@@ -1,7 +1,6 @@
 'use client'
 
 import { Clock, CheckCircle2, XCircle } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 interface OrderStatusHeroProps {
   status: string

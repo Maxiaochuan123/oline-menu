@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronRight, Crown, Plus, ShieldAlert, Trash2 } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Crown, ShieldAlert, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { MembershipTierConfig, Merchant } from '@/lib/types'
 import {
@@ -293,6 +293,7 @@ export default function MembershipPage() {
           <div className="flex items-center">
             <button
               type="button"
+              data-testid="membership-mode-default"
               onClick={() => {
                 setValue('customMembershipEnabled', false, { shouldDirty: true })
                 replace(DEFAULT_MEMBERSHIP_TIER_CONFIGS)
@@ -308,6 +309,7 @@ export default function MembershipPage() {
             </button>
             <button
               type="button"
+              data-testid="membership-mode-custom"
               onClick={() => setShowMembershipRisk(true)}
               className={cn(
                 "flex flex-1 items-center justify-center gap-2 rounded-full py-4 text-xs font-black transition-all",
@@ -337,7 +339,7 @@ export default function MembershipPage() {
                     : [currentTier.minPoints, nextLevel!.minPoints - 1]
 
                 return (
-                  <div key={currentTier.id} className="group relative">
+                  <div key={currentTier.id} className="group relative" data-testid={`membership-tier-card-${index}`}>
                     {/* 等级序号装饰 */}
                     <div className="absolute -left-3 -top-3 z-10 flex size-9 items-center justify-center rounded-[14px] bg-white font-black text-slate-300 shadow-[0_4px_10px_rgba(0,0,0,0.03)] ring-1 ring-slate-100/80">
                       {index + 1}
@@ -378,6 +380,7 @@ export default function MembershipPage() {
                           {customMembershipEnabled && (
                             <Button
                               type="button"
+                              data-testid={`membership-tier-remove-${index}`}
                               size="icon"
                               variant="ghost"
                               className="size-11 rounded-2xl bg-slate-50 text-slate-400 transition-all hover:bg-rose-50 hover:text-rose-500 hover:shadow-inner"
@@ -394,6 +397,7 @@ export default function MembershipPage() {
                           <div className="space-y-2">
                             <Label className="ml-1 text-[10px] font-black uppercase tracking-widest text-slate-400">等级视觉名称</Label>
                             <Input
+                              data-testid={`membership-tier-name-${index}`}
                               value={currentTier.name}
                               disabled={!customMembershipEnabled}
                               onChange={e => updateTierName(index, e.target.value)}
@@ -406,6 +410,7 @@ export default function MembershipPage() {
                             <Label className="ml-1 text-[10px] font-black uppercase tracking-widest text-slate-400">折扣比例 (%)</Label>
                             <div className="relative">
                               <Input
+                                data-testid={`membership-tier-rate-${index}`}
                                 type="number"
                                 step="1"
                                 min="1"
@@ -430,13 +435,16 @@ export default function MembershipPage() {
                               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">成长分晋升轨道</span>
                             </div>
                             <Badge className="bg-white px-4 py-1.5 font-mono font-black text-emerald-600 shadow-sm ring-1 ring-emerald-100/50 text-[11px]">
+                              <span data-testid={`membership-tier-range-${index}`}>
                                {isFirstTier ? `0 - ${nextLevel ? nextLevel.minPoints - 1 : sliderMax}` : level.maxPoints === -1 ? `${level.minPoints}+` : `${level.minPoints} - ${level.maxPoints}`}
+                              </span>
                             </Badge>
                           </div>
                           
                           <div className="px-1 py-1">
                             {isFirstTier ? (
                               <Slider
+                                data-testid={`membership-tier-slider-${index}`}
                                 min={1}
                                 max={sliderMax}
                                 step={10}
@@ -450,6 +458,7 @@ export default function MembershipPage() {
                               />
                             ) : isLastTier ? (
                               <Slider
+                                data-testid={`membership-tier-slider-${index}`}
                                 min={index === 0 ? 1 : tiers[index - 1].minPoints + 1}
                                 max={sliderMax}
                                 step={10}
@@ -463,6 +472,7 @@ export default function MembershipPage() {
                               />
                             ) : (
                               <Slider
+                                data-testid={`membership-tier-slider-${index}`}
                                 min={index === 0 ? 1 : tiers[index - 1].minPoints + 1}
                                 max={sliderMax}
                                 step={10}
@@ -488,6 +498,7 @@ export default function MembershipPage() {
                 <div className="flex items-center gap-4 px-2">
                   <Button
                     type="button"
+                    data-testid="membership-add-tier"
                     variant="outline"
                     className="h-15 flex-1 rounded-3xl border-dashed border-emerald-300 bg-emerald-50/30 font-black text-emerald-600 transition-all hover:bg-emerald-50 hover:border-emerald-400 active:scale-95 disabled:bg-slate-50 disabled:border-slate-200 disabled:text-slate-400"
                     onClick={addMembershipTier}
@@ -512,6 +523,7 @@ export default function MembershipPage() {
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-white via-white/95 to-transparent p-6 pb-12">
         <div className="mx-auto flex max-w-md items-center gap-4">
           <Button
+            data-testid="membership-save-button"
             className="group h-16 w-full rounded-[1.5rem] bg-slate-900 text-[15px] font-black text-white shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] ring-offset-4 transition-all hover:bg-black hover:ring-2 hover:ring-slate-900 active:scale-95 disabled:bg-slate-400"
             onClick={handleSubmit(onSubmit, onInvalid)}
             disabled={saving}
@@ -551,6 +563,7 @@ export default function MembershipPage() {
           </div>
           <div className="flex flex-col gap-2 p-6 pt-0">
             <AlertDialogAction
+              data-testid="membership-risk-confirm"
               className="h-12 rounded-[18px] bg-emerald-600 font-black text-white shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95"
               onClick={() => {
                 setValue('customMembershipEnabled', true, { shouldDirty: true })

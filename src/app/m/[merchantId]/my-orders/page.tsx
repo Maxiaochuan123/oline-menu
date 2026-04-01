@@ -83,13 +83,13 @@ export default function MyOrdersPage({ params }: { params: Promise<{ merchantId:
 
       <div style={{ padding: '16px 20px 40px' }}>
         {!phone ? (
-          <div className="empty-state">
+          <div data-testid="customer-orders-empty-state" className="empty-state">
             <Package />
             <p>还没有下过单哦</p>
             <Link href={`/m/${merchantId}`} className="btn btn-primary" style={{ marginTop: '16px' }}>去点菜</Link>
           </div>
         ) : orders.length === 0 ? (
-          <div className="empty-state">
+          <div data-testid="customer-orders-empty-state" className="empty-state">
             <Package />
             <p>暂无订单记录</p>
             <Link href={`/m/${merchantId}`} className="btn btn-primary" style={{ marginTop: '16px' }}>去点菜</Link>
@@ -127,7 +127,7 @@ function OrderCard({ order, merchantId }: { order: Order; merchantId: string }) 
   const isActive = !['completed', 'cancelled'].includes(order.status)
 
   return (
-    <Link href={`/m/${merchantId}/order/${order.id}`} style={{ textDecoration: 'none' }}>
+    <Link data-testid={`customer-order-card-${order.id}`} href={`/m/${merchantId}/order/${order.id}`} style={{ textDecoration: 'none' }}>
       <div className="card animate-fade-in" style={{
         marginBottom: '10px', cursor: 'pointer',
         opacity: isActive ? 1 : 0.7,

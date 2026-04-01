@@ -47,6 +47,19 @@ CREATE INDEX IF NOT EXISTS idx_coupons_merchant    ON coupons(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_user_coupons_customer ON user_coupons(customer_id);
 CREATE INDEX IF NOT EXISTS idx_user_coupons_status  ON user_coupons(status);
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'user_coupons_customer_coupon_unique'
+  ) THEN
+    ALTER TABLE user_coupons
+      ADD CONSTRAINT user_coupons_customer_coupon_unique
+      UNIQUE (customer_id, coupon_id);
+  END IF;
+END $$;
+
 -- ============================================
 -- 5. RLS 策略
 -- ============================================

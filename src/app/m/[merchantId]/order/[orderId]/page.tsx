@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { Order, Merchant, OrderItem, Message } from '@/lib/types'
 import { formatPrice, cn } from '@/lib/utils'
 import { calculateCancellationPenalty } from '@/lib/order'
+import { rollbackCustomerAssetsForOrder } from '@/lib/order-assets'
 import { 
   CheckCircle2, AlertCircle, X,
   ArrowLeft, RefreshCw, QrCode, Gift
@@ -38,6 +39,7 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
   const [merchant, setMerchant] = useState<Merchant | null>(null)
   const [items, setItems] = useState<OrderItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
   const [showPayQr, setShowPayQr] = useState(false)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
   const [, setTick] = useState(0)
@@ -81,25 +83,49 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
     return () => clearInterval(timer)
   }, [order])
 
-  const loadMessages = useCallback(async () => {
-    const { data } = await supabase
+  const markMerchantMessagesAsRead = useCallback(async (sourceMessages: Message[]) => {
+    const unreadMerchantMessageIds = sourceMessages
+      .filter((message) => message.sender === 'merchant' && !message.is_read_by_customer)
+      .map((message) => message.id)
+
+    if (unreadMerchantMessageIds.length === 0) return
+
+    await supabase
       .from('messages')
-      .select('*')
-      .eq('order_id', orderId)
-      .order('created_at', { ascending: true })
-    setMessages(data || [])
-  }, [supabase, orderId])
+      .update({ is_read_by_customer: true })
+      .in('id', unreadMerchantMessageIds)
+
+    setMessages((prev) =>
+      prev.map((message) =>
+        unreadMerchantMessageIds.includes(message.id)
+          ? { ...message, is_read_by_customer: true }
+          : message,
+      ),
+    )
+  }, [supabase])
 
   const loadData = useCallback(async () => {
     const [oRes, mRes, iRes] = await Promise.all([
-      supabase.from('orders').select('*').eq('id', orderId).single(),
+      supabase.from('orders').select('*').eq('id', orderId).eq('merchant_id', merchantId).maybeSingle(),
       supabase.from('merchants').select('*').eq('id', merchantId).single(),
       supabase.from('order_items').select('*').eq('order_id', orderId)
     ])
 
-    if (oRes.data) setOrder(oRes.data)
-    if (mRes.data) setMerchant(mRes.data)
-    if (iRes.data) setItems(iRes.data)
+    if (!oRes.data || !mRes.data) {
+      setOrder(null)
+      setMerchant(mRes.data ?? null)
+      setItems([])
+      setMessages([])
+      setUsedCoupons([])
+      setNotFound(true)
+      setLoading(false)
+      return
+    }
+
+    setNotFound(false)
+    setOrder(oRes.data)
+    setMerchant(mRes.data)
+    setItems(iRes.data || [])
     
     const ids = oRes.data?.coupon_ids ?? []
     if (ids.length > 0) {
@@ -107,9 +133,17 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
       setUsedCoupons(couponList || [])
     }
     
-    loadMessages()
+    const { data: messageData } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: true })
+
+    const nextMessages = messageData || []
+    setMessages(nextMessages)
+    await markMerchantMessagesAsRead(nextMessages)
     setLoading(false)
-  }, [supabase, orderId, merchantId, loadMessages])
+  }, [supabase, orderId, merchantId, markMerchantMessagesAsRead])
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => loadData())
@@ -131,6 +165,17 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `order_id=eq.${orderId}` }, (payload) => {
         const newMessage = payload.new as Message
         setMessages(prev => prev.some(m => m.id === newMessage.id) ? prev : [...prev, newMessage])
+        if (newMessage.sender === 'merchant' && !newMessage.is_read_by_customer) {
+          supabase.from('messages').update({ is_read_by_customer: true }).eq('id', newMessage.id).then(() => {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === newMessage.id
+                  ? { ...message, is_read_by_customer: true }
+                  : message,
+              ),
+            )
+          })
+        }
       })
       .subscribe()
 
@@ -182,12 +227,22 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
 
     const penaltyAmount = Number(order.total_amount) * penaltyRes.rate
     const refundAmount = Number(order.total_amount) - penaltyAmount
-    
-    await supabase.from('orders').update({
+
+    const { error } = await supabase.from('orders').update({
         status: 'cancelled', cancelled_by: 'customer', cancelled_at: new Date().toISOString(),
         penalty_rate: penaltyRes.rate, penalty_amount: penaltyAmount, refund_amount: refundAmount,
         after_sales_reason: cancelReason.trim(), is_coupon_refunded: true,
       }).eq('id', order.id)
+
+    if (error) return
+
+    await rollbackCustomerAssetsForOrder({
+      supabase,
+      order,
+      couponIdsToRefund: order.coupon_ids ?? [],
+      refundAmount,
+      isFullRefund: refundAmount >= Number(order.total_amount),
+    })
 
     setShowCancelConfirm(false)
     loadData()
@@ -213,7 +268,29 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
     loadData()
   }
 
-  if (loading || !order) return <div className="flex items-center justify-center h-screen"><span className="spinner" /></div>
+  if (loading) return <div className="flex items-center justify-center h-screen"><span className="spinner" /></div>
+
+  if (notFound || !order || !merchant) {
+    return (
+      <div className="min-h-screen bg-slate-50/50 px-5 py-8">
+        <div className="max-w-xl mx-auto bg-white rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/40 p-8 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-rose-50 text-rose-500 flex items-center justify-center mx-auto mb-5">
+            <AlertCircle size={28} />
+          </div>
+          <h1 className="text-xl font-black text-slate-900 tracking-tight">订单不存在</h1>
+          <p className="text-sm font-medium text-slate-500 mt-3 leading-relaxed">
+            这个订单可能已失效，或者不属于当前店铺。
+          </p>
+          <Link
+            href={`/m/${merchantId}`}
+            className="inline-flex items-center justify-center mt-6 h-11 px-6 rounded-full bg-slate-900 text-white text-sm font-black shadow-lg shadow-slate-200"
+          >
+            返回店铺
+          </Link>
+        </div>
+      </div>
+    )
+  }
 
   const status = STATUS_MAP[order.status]
   const penalty = calculateCancellationPenalty(order)
@@ -254,24 +331,24 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
 
               <div className="space-y-3">
                 {order.status === 'pending' && (merchant?.payment_qr_urls?.wechat || merchant?.payment_qr_urls?.alipay || merchant?.payment_qr_url) && (
-                  <button className="w-full bg-slate-900 text-white h-12 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-slate-200" onClick={() => setShowPayQr(true)}>
+                  <button data-testid="order-cta-pay" className="w-full bg-slate-900 text-white h-12 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-slate-200" onClick={() => setShowPayQr(true)}>
                     <QrCode size={18} /> 查看支付收款码
                   </button>
                 )}
 
                 <div className="grid grid-cols-2 gap-3">
-                  {order.status === 'pending' && <button className="col-span-2 h-12 rounded-2xl border-2 border-slate-100 text-slate-500 font-black text-sm" onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}>取消订单</button>}
-                  {order.status === 'preparing' && <button className="col-span-2 h-12 rounded-2xl border-2 border-slate-100 text-slate-500 font-black text-sm" onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}>申请退单</button>}
+                  {order.status === 'pending' && <button data-testid="order-cta-cancel" className="col-span-2 h-12 rounded-2xl border-2 border-slate-100 text-slate-500 font-black text-sm" onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}>取消订单</button>}
+                  {order.status === 'preparing' && <button data-testid="order-cta-cancel" className="col-span-2 h-12 rounded-2xl border-2 border-slate-100 text-slate-500 font-black text-sm" onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}>申请退单</button>}
                   {order.status === 'delivering' && order.after_sales_status === 'none' && (
                     <>
-                      <button className="h-11 rounded-2xl border-2 border-rose-100 text-rose-500 font-black text-sm" onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}>申请退单</button>
-                      <button className="h-11 rounded-2xl border-2 border-amber-100 text-amber-600 font-black text-sm" onClick={handleNegotiateRefund}>与商家协商</button>
+                      <button data-testid="order-cta-cancel" className="h-11 rounded-2xl border-2 border-rose-100 text-rose-500 font-black text-sm" onClick={() => { setCancelReason(''); setShowCancelConfirm(true) }}>申请退单</button>
+                      <button data-testid="order-cta-negotiate" className="h-11 rounded-2xl border-2 border-amber-100 text-amber-600 font-black text-sm" onClick={handleNegotiateRefund}>与商家协商</button>
                     </>
                   )}
                 </div>
 
                 {order.status === 'completed' && order.after_sales_status === 'none' && (
-                  <button className="w-full h-11 rounded-2xl border-2 border-slate-100 text-slate-500 font-black text-sm" onClick={() => setShowAfterSales(true)}>对菜品不满意？申请售后</button>
+                  <button data-testid="order-cta-after-sales" className="w-full h-11 rounded-2xl border-2 border-slate-100 text-slate-500 font-black text-sm" onClick={() => setShowAfterSales(true)}>对菜品不满意？申请售后</button>
                 )}
               </div>
             </>
@@ -279,9 +356,9 @@ export default function OrderStatusPage({ params }: { params: Promise<{ merchant
 
           {/* 售后状态提醒 */}
           {order.after_sales_status === 'pending' && (
-             <div className="mt-4 p-4 bg-rose-50 border border-rose-100 rounded-2xl text-center">
+             <div data-testid="order-after-sales-pending" className="mt-4 p-4 bg-rose-50 border border-rose-100 rounded-2xl text-center">
                <div className="text-rose-600 text-[13px] font-black mb-3">售后申请已提交，等待商家处理...</div>
-               <button disabled={urgeCountdown > 0} onClick={handleUrgeOrder} className="px-6 py-2 rounded-full border border-rose-200 text-rose-500 text-xs font-black bg-white">
+               <button data-testid="order-cta-urge" disabled={urgeCountdown > 0} onClick={handleUrgeOrder} className="px-6 py-2 rounded-full border border-rose-200 text-rose-500 text-xs font-black bg-white">
                  {urgeCountdown > 0 ? `催单冷却中 (${Math.floor(urgeCountdown / 60)}:${(urgeCountdown % 60).toString().padStart(2, '0')})` : '催促商家处理'}
                </button>
              </div>

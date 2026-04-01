@@ -1,5 +1,7 @@
 'use client'
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useState, useEffect } from 'react'
 import type { MenuItem } from '@/lib/types'
 import { formatPrice } from '@/lib/utils'

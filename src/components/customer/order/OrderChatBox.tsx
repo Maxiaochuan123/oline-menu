@@ -70,6 +70,7 @@ export default function OrderChatBox({
         placeholder="给商家留言..."
         scrollAreaClassName="min-h-[120px] max-h-[420px] bg-slate-50/30"
         scrollContainerRef={scrollContainerRef}
+        testIdPrefix="customer-order-chat"
         emptyState={
           <div className="flex flex-col items-center justify-center py-10 text-slate-400">
             <MessageSquare size={40} className="mb-2 opacity-10" />

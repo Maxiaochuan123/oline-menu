@@ -7,6 +7,7 @@ import Image from 'next/image'
 import { useToast } from '@/components/common/Toast'
 import { formatPrice, cn } from '@/lib/utils'
 import { calculateCancellationPenalty } from '@/lib/order'
+import { rollbackCustomerAssetsForOrder } from '@/lib/order-assets'
 import OrderItemsCard from '@/components/OrderItemsCard'
 import type { UsedCoupon } from '@/components/OrderItemsCard'
 import type { Order, Message } from '@/lib/types'
@@ -137,6 +138,7 @@ function AfterSalesStatusCard({
           
           <Button 
             variant="destructive" 
+            data-testid="merchant-after-sales-handle-button"
             className="w-full h-9 shadow-sm font-bold"
             onClick={onHandleRefund}
           >
@@ -265,6 +267,7 @@ function RefundConsoleDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px] border-none shadow-2xl p-0 overflow-hidden bg-slate-50 rounded-3xl">
+        <div data-testid="merchant-refund-dialog" />
         <DialogHeader className="p-6 bg-white border-b flex-shrink-0">
           <DialogTitle className="text-2xl font-black tracking-tight">退款协商控制台</DialogTitle>
         </DialogHeader>
@@ -296,6 +299,7 @@ function RefundConsoleDialog({
                {REFUND_MODES.map(mode => (
                  <Button 
                    key={mode.value}
+                   data-testid={`merchant-refund-mode-${mode.value}`}
                    variant={refundMode === mode.value ? 'secondary' : 'ghost'} 
                    className={cn("flex-1 h-9 text-xs font-black rounded-xl transition-all", refundMode === mode.value ? "bg-white shadow-md text-orange-600" : "text-slate-500 hover:bg-white/20")}
                    onClick={() => setRefundMode(mode.value)}
@@ -308,7 +312,7 @@ function RefundConsoleDialog({
                 <div className="space-y-2.5">
                   <Label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">拟定退款绝对值 (固定金额)</Label>
                   <div className="relative">
-                     <Input type="number" value={refundInput} onChange={e => setRefundInput(e.target.value)} className="font-mono text-2xl font-black h-16 bg-white rounded-2xl shadow-sm border-slate-100 focus-visible:ring-orange-500 transition-all font-bold" />
+                     <Input data-testid="merchant-refund-fixed-input" type="number" value={refundInput} onChange={e => setRefundInput(e.target.value)} className="font-mono text-2xl font-black h-16 bg-white rounded-2xl shadow-sm border-slate-100 focus-visible:ring-orange-500 transition-all font-bold" />
                   </div>
                 </div>
               )}
@@ -316,7 +320,7 @@ function RefundConsoleDialog({
                 <div className="space-y-2.5">
                   <Label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">按订单实付比例结算 (%)</Label>
                   <div className="relative">
-                    <Input type="number" value={refundInput} onChange={e => setRefundInput(e.target.value)} className="font-mono text-2xl font-black h-16 bg-white rounded-2xl shadow-sm border-slate-100 focus-visible:ring-orange-500 px-6 transition-all font-bold" placeholder="0-100" />
+                    <Input data-testid="merchant-refund-ratio-input" type="number" value={refundInput} onChange={e => setRefundInput(e.target.value)} className="font-mono text-2xl font-black h-16 bg-white rounded-2xl shadow-sm border-slate-100 focus-visible:ring-orange-500 px-6 transition-all font-bold" placeholder="0-100" />
                     <span className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-300 font-black">%</span>
                   </div>
                 </div>
@@ -332,6 +336,7 @@ function RefundConsoleDialog({
                           <div key={item.id} className="flex items-center justify-between py-3.5 px-4 hover:bg-slate-50/50 transition-colors">
                             <div className="flex items-center gap-3.5">
                               <Checkbox 
+                                data-testid={`merchant-refund-item-check-${item.id}`}
                                 className="rounded data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500"
                                 checked={currentQty > 0} 
                                 onCheckedChange={(checked) => setSelectedRefundItems(prev => ({ ...prev, [item.id]: checked ? item.quantity : 0 }))} 
@@ -344,7 +349,7 @@ function RefundConsoleDialog({
                             <div className="flex items-center gap-5">
                               <div className="flex items-center ring-1 ring-slate-200 rounded-lg overflow-hidden h-8 bg-slate-50/50">
                                 <Button variant="ghost" className="size-8 p-0 rounded-none text-slate-400 hover:text-slate-600" disabled={currentQty <= 1} onClick={() => setSelectedRefundItems(p => ({ ...p, [item.id]: p[item.id] - 1 }))}>-</Button>
-                                <span className="text-xs font-black w-7 text-center">{currentQty}</span>
+                                <span data-testid={`merchant-refund-item-qty-${item.id}`} className="text-xs font-black w-7 text-center">{currentQty}</span>
                                 <Button variant="ghost" className="size-8 p-0 rounded-none text-slate-400 hover:text-slate-600" disabled={currentQty >= item.quantity} onClick={() => setSelectedRefundItems(p => ({ ...p, [item.id]: (p[item.id] || 0) + 1 }))}>+</Button>
                               </div>
                               <span className="text-xs font-black text-slate-600 w-16 text-right font-mono tracking-tighter">{formatPrice(item.item_price * currentQty)}</span>
@@ -391,7 +396,7 @@ function RefundConsoleDialog({
 
             <div className="bg-orange-500 rounded-[2.5rem] p-8 shadow-2xl shadow-orange-200 ring-4 ring-orange-500/10 space-y-1 transform scale-100 hover:scale-[1.01] transition-all">
               <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] text-center mb-1">拟同意退款合计总额</p>
-              <p className="text-4xl font-black text-white text-center font-mono tracking-tighter drop-shadow-sm">{formatPrice(currentRefundTotal())}</p>
+              <p data-testid="merchant-refund-total" className="text-4xl font-black text-white text-center font-mono tracking-tighter drop-shadow-sm">{formatPrice(currentRefundTotal())}</p>
               {currentRefundTotal() >= Number(order.total_amount) && (
                 <div className="flex justify-center mt-3">
                   <span className="text-[10px] font-black text-white bg-red-600/30 px-3 py-1 rounded-full ring-1 ring-white/20 animate-pulse">⚠️ 已达最大退款额度限制</span>
@@ -649,35 +654,6 @@ export default function OrderManagerModal({
     return Math.min(amt, Number(order.total_amount))
   }
 
-  async function rollbackCustomerAssets({ couponIdsToRefund, refundAmount, isFullRefund }: {
-    couponIdsToRefund: string[]
-    refundAmount: number
-    isFullRefund: boolean
-  }) {
-    if (!order.customer_id) return
-    if (couponIdsToRefund.length > 0) {
-      await supabase
-        .from('user_coupons')
-        .update({ status: 'unused', used_at: null })
-        .eq('customer_id', order.customer_id)
-        .in('coupon_id', couponIdsToRefund)
-        .eq('status', 'used')
-    }
-    if (refundAmount > 0) {
-      const { data: cust } = await supabase.from('customers').select('points, order_count, total_spent').eq('id', order.customer_id).single()
-      if (cust) {
-        const pointsToRollback = Math.floor(Number(order.total_amount))
-        await supabase.from('customers')
-          .update({ 
-            points: Math.max(0, (cust.points ?? 0) - pointsToRollback),
-            order_count: isFullRefund ? Math.max(0, (cust.order_count ?? 0) - 1) : cust.order_count,
-            total_spent: Math.max(0, (cust.total_spent ?? 0) - refundAmount)
-          })
-          .eq('id', order.customer_id)
-      }
-    }
-  }
-
   function requestRefundConfirm() {
     const amt = currentRefundTotal()
     if (amt <= 0) return toast('退款金额必须大于 0', 'warning')
@@ -705,7 +681,9 @@ export default function OrderManagerModal({
       if (error) {
         toast('处理失败', 'error')
       } else {
-        await rollbackCustomerAssets({
+        await rollbackCustomerAssetsForOrder({
+          supabase,
+          order,
           couponIdsToRefund: hasCouponRefund ? Array.from(selectedCouponRefundIds) : [],
           refundAmount: amt,
           isFullRefund,
@@ -760,7 +738,9 @@ export default function OrderManagerModal({
         toast('取消失败', 'error')
       } else {
         toast('订单已成功取消', 'success')
-        await rollbackCustomerAssets({
+        await rollbackCustomerAssetsForOrder({
+          supabase,
+          order,
           couponIdsToRefund: order.coupon_ids ?? [],
           refundAmount: Number(order.total_amount),
           isFullRefund: true,
@@ -778,7 +758,12 @@ export default function OrderManagerModal({
     try {
       const idx = STATUS_FLOW.indexOf(order.status)
       const nextStatus = STATUS_FLOW[idx + 1]
-      const { error } = await supabase.from('orders').update({ status: nextStatus }).eq('id', order.id)
+      const updatePayload =
+        nextStatus === 'preparing' && !order.confirmed_at
+          ? { status: nextStatus, confirmed_at: new Date().toISOString() }
+          : { status: nextStatus }
+
+      const { error } = await supabase.from('orders').update(updatePayload).eq('id', order.id)
       if (error) toast('更新状态失败', 'error')
       else {
         onSuccess()
@@ -799,6 +784,7 @@ export default function OrderManagerModal({
       <Dialog open={!!order} onOpenChange={(open) => !open && onClose()}>
         <DialogContent 
           initialFocus={false}
+          data-testid="merchant-order-modal"
           className="sm:max-w-[550px] w-[95vw] max-h-[90vh] flex flex-col p-0 overflow-hidden gap-0 border-none shadow-2xl rounded-2xl bg-white ring-1 ring-black/5 font-sans"
         >
           {/* Header */}
@@ -856,6 +842,7 @@ export default function OrderManagerModal({
                     scrollAreaClassName="h-[240px]"
                     showInput={order.status !== 'cancelled'}
                     scrollContainerRef={modalBodyRef}
+                    testIdPrefix="merchant-order-chat"
                   />
                 </Card>
               )}
@@ -864,10 +851,11 @@ export default function OrderManagerModal({
 
           {!['completed', 'cancelled'].includes(order.status) && (
             <div className="px-6 py-4 border-t bg-white flex gap-3 flex-shrink-0 pb-safe shadow-[0_-4px_12px_rgba(0,0,0,0.02)]">
-              <Button variant="outline" className="flex-1 text-red-500 hover:bg-red-50 border-slate-200 font-bold h-11" onClick={() => setShowCancel(true)}>
+              <Button data-testid="merchant-order-cancel-button" variant="outline" className="flex-1 text-red-500 hover:bg-red-50 border-slate-200 font-bold h-11" onClick={() => setShowCancel(true)}>
                 取消订单
               </Button>
               <Button 
+                data-testid="merchant-order-next-status-button"
                 className="flex-[2] h-11 bg-orange-500 hover:bg-orange-600 shadow-orange-200 shadow-lg font-black text-base"
                 disabled={order.after_sales_status === 'pending'}
                 onClick={() => setIsConfirmingStatus(true)}
@@ -912,7 +900,7 @@ export default function OrderManagerModal({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-3 sm:gap-0 font-bold">
-            <AlertDialogCancel className="rounded-xl h-11 border-slate-200" disabled={isProcessing}>再想想</AlertDialogCancel>
+            <AlertDialogCancel data-testid="merchant-cancel-order-dialog-cancel" className="rounded-xl h-11 border-slate-200" disabled={isProcessing}>再想想</AlertDialogCancel>
             <AlertDialogAction onClick={cancelOrder} disabled={isProcessing} className="rounded-xl h-11 bg-red-600 hover:bg-red-700 shadow-lg shadow-red-100">确认极速取消</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -935,7 +923,7 @@ export default function OrderManagerModal({
             </div>
           </div>
           <div className="p-6 bg-white grid grid-cols-2 gap-4">
-            <AlertDialogCancel className="rounded-2xl h-12 border-slate-100 font-bold hover:bg-slate-50 transition-all" disabled={isProcessing}>取消</AlertDialogCancel>
+            <AlertDialogCancel data-testid="merchant-status-dialog-cancel" className="rounded-2xl h-12 border-slate-100 font-bold hover:bg-slate-50 transition-all" disabled={isProcessing}>取消</AlertDialogCancel>
             <AlertDialogAction onClick={updateStatus} disabled={isProcessing} className="rounded-2xl h-12 bg-orange-500 hover:bg-orange-600 font-black shadow-lg shadow-orange-100 text-base transition-all">确认更新</AlertDialogAction>
           </div>
         </AlertDialogContent>
@@ -952,7 +940,7 @@ export default function OrderManagerModal({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-3 sm:gap-0 font-bold">
-            <AlertDialogCancel className="rounded-xl h-11 border-slate-200" disabled={isProcessing}>取消</AlertDialogCancel>
+            <AlertDialogCancel data-testid="merchant-refund-confirm-cancel" className="rounded-xl h-11 border-slate-200" disabled={isProcessing}>取消</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmRefund} disabled={isProcessing} className="rounded-xl h-11 bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-100">{isProcessing ? '处理中...' : '确认退款'}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -969,7 +957,7 @@ export default function OrderManagerModal({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-3 sm:gap-0 font-bold">
-            <AlertDialogCancel className="rounded-xl h-11 border-slate-200" disabled={isProcessing}>取消</AlertDialogCancel>
+            <AlertDialogCancel data-testid="merchant-reject-confirm-cancel" className="rounded-xl h-11 border-slate-200" disabled={isProcessing}>取消</AlertDialogCancel>
             <AlertDialogAction onClick={handleRejectRefund} disabled={isProcessing} className="rounded-xl h-11 bg-red-600 hover:bg-red-700 shadow-lg shadow-red-100">{isProcessing ? '处理中...' : '确认驳回'}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

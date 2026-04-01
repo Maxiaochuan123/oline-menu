@@ -25,6 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar"
 import { TimePicker } from "@/components/ui/time-picker"
 import { cn } from '@/lib/utils'
+import { isSupportedImageFile } from '@/lib/image-upload'
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -115,6 +116,25 @@ export default function SettingsPage() {
     return null
   }
 
+  function handleQrFileChange(
+    file: File | null,
+    setFile: (value: File | null) => void,
+    setPreview: (value: string | null) => void,
+    fallbackPreview: string | null,
+  ) {
+    if (!file) return
+
+    if (!isSupportedImageFile(file)) {
+      setFile(null)
+      setPreview(fallbackPreview)
+      toast('请上传图片文件', 'warning')
+      return
+    }
+
+    setFile(file)
+    setPreview(URL.createObjectURL(file))
+  }
+
   async function saveSettings() {
     if (!merchant) return
     setSaving(true)
@@ -126,11 +146,13 @@ export default function SettingsPage() {
 
       if (wechatFile) {
         const url = await uploadQr(wechatFile, merchant.id, 'wechat')
-        if (url) wechatUrl = url
+        if (!url) throw new Error('微信收款码上传失败')
+        wechatUrl = url
       }
       if (alipayFile) {
         const url = await uploadQr(alipayFile, merchant.id, 'alipay')
-        if (url) alipayUrl = url
+        if (!url) throw new Error('支付宝收款码上传失败')
+        alipayUrl = url
       }
 
       const { error } = await supabase.from('merchants').update({
@@ -269,7 +291,8 @@ export default function SettingsPage() {
                       实时控制店铺营业状态。
                     </p>
                   </div>
-                  <Switch 
+                  <Switch
+                    data-testid="settings-accepting-switch"
                     checked={isAccepting}
                     onCheckedChange={setIsAccepting}
                     className="scale-125 data-[state=checked]:bg-emerald-500"
@@ -285,7 +308,8 @@ export default function SettingsPage() {
                       <Label className="text-sm font-black text-slate-800">自动定时营业</Label>
                       <p className="text-[10px] font-medium text-slate-400">在设定时间段内自动接单，其余时间关店</p>
                     </div>
-                    <Switch 
+                    <Switch
+                      data-testid="settings-auto-open-switch"
                       checked={isAutoOpen}
                       onCheckedChange={setIsAutoOpen}
                       className="data-[state=checked]:bg-blue-500"
@@ -296,14 +320,16 @@ export default function SettingsPage() {
                     <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300 bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100">
                       <div className="space-y-3">
                         <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">开店时间点</Label>
-                        <TimePicker 
+                        <TimePicker
+                          testIdPrefix="settings-open-time"
                           value={openTime} 
                           onChange={setOpenTime} 
                         />
                       </div>
                       <div className="space-y-3">
                         <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">关店时间点</Label>
-                        <TimePicker 
+                        <TimePicker
+                          testIdPrefix="settings-close-time"
                           value={closeTime} 
                           onChange={setCloseTime} 
                         />
@@ -320,7 +346,8 @@ export default function SettingsPage() {
                     <Label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">品牌名称</Label>
                     <div className="relative group">
                       <Store className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-300 group-focus-within:text-emerald-500 transition-colors" />
-                      <Input 
+                      <Input
+                        data-testid="settings-shop-name"
                         value={shopName} 
                         onChange={e => setShopName(e.target.value)}
                         placeholder="输入您的店名"
@@ -337,7 +364,8 @@ export default function SettingsPage() {
                     </div>
                     <div className="relative">
                       <Bell className="absolute left-4 top-4 size-4 text-amber-400/60" />
-                      <Textarea 
+                      <Textarea
+                        data-testid="settings-announcement"
                         rows={3} 
                         placeholder="例如：主厨休假，暂不对外营业。下周一见！" 
                         value={announcement} 
@@ -376,15 +404,17 @@ export default function SettingsPage() {
                         </div>
                       )}
                       <input 
+                        data-testid="settings-wechat-file-input"
                         type="file" 
                         accept="image/*" 
                         className="absolute inset-0 opacity-0 cursor-pointer z-10" 
                         onChange={e => {
-                          const f = e.target.files?.[0] || null
-                          if (f) {
-                            setWechatFile(f)
-                            setWechatPreview(URL.createObjectURL(f))
-                          }
+                          handleQrFileChange(
+                            e.target.files?.[0] || null,
+                            setWechatFile,
+                            setWechatPreview,
+                            merchant?.payment_qr_urls?.wechat || null,
+                          )
                         }} 
                       />
                     </div>
@@ -405,15 +435,17 @@ export default function SettingsPage() {
                         </div>
                       )}
                       <input 
+                        data-testid="settings-alipay-file-input"
                         type="file" 
                         accept="image/*" 
                         className="absolute inset-0 opacity-0 cursor-pointer z-10" 
                         onChange={e => {
-                          const f = e.target.files?.[0] || null
-                          if (f) {
-                            setAlipayFile(f)
-                            setAlipayPreview(URL.createObjectURL(f))
-                          }
+                          handleQrFileChange(
+                            e.target.files?.[0] || null,
+                            setAlipayFile,
+                            setAlipayPreview,
+                            merchant?.payment_qr_urls?.alipay || null,
+                          )
                         }} 
                       />
                     </div>
@@ -459,7 +491,8 @@ export default function SettingsPage() {
               <CalendarDays size={14} className="text-slate-400" />
               <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">停业日期管理</span>
             </div>
-            <Button 
+            <Button
+               data-testid="settings-disabled-date-add"
                variant="ghost" 
                size="sm" 
                onClick={() => setShowDateForm(true)}
@@ -477,7 +510,7 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 disabledDates.map(d => (
-                  <div key={d.id} className="flex items-center justify-between p-3 rounded-xl active:bg-slate-50 transition-colors group">
+                  <div key={d.id} data-testid={`settings-disabled-date-card-${d.id}`} className="flex items-center justify-between p-3 rounded-xl active:bg-slate-50 transition-colors group">
                     <div className="flex items-center gap-3">
                       <div className="size-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 font-bold text-[10px]">
                         {d.disabled_date.split('-').slice(1).join('/')}
@@ -488,7 +521,8 @@ export default function SettingsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 transition-all">
-                      <Button 
+                      <Button
+                        data-testid={`settings-disabled-date-edit-${d.id}`}
                         variant="ghost" 
                         size="icon" 
                         className="size-8 text-slate-400 active:text-emerald-500 active:bg-emerald-50"
@@ -501,7 +535,8 @@ export default function SettingsPage() {
                       >
                         <Pencil size={14} />
                       </Button>
-                      <Button 
+                      <Button
+                        data-testid={`settings-disabled-date-remove-${d.id}`}
                         variant="ghost" 
                         size="icon" 
                         className="size-8 text-rose-400 active:text-rose-500 active:bg-rose-50"
@@ -520,7 +555,8 @@ export default function SettingsPage() {
         {/* 底部操作区域 - 使用更加大胆的按钮设计 */}
         <div className="fixed bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none z-40">
            <div className="max-w-md mx-auto pointer-events-auto">
-              <Button 
+              <Button
+                data-testid="settings-save-button"
                 className="w-full h-16 rounded-[2rem] bg-slate-900 active:bg-black text-white font-black text-lg shadow-[0_20px_40px_rgba(15,15,15,0.15)] active:scale-95 transition-all flex items-center justify-center gap-3"
                 onClick={saveSettings}
                 disabled={saving}
