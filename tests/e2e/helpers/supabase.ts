@@ -282,7 +282,7 @@ export async function createMerchantAccount(): Promise<SeededMerchant> {
     () => client
       .from('merchants')
       .insert({
-        user_id: signUpData.user.id,
+        user_id: signUpData.user!.id,
         email: phone,
         shop_name: `E2E商家${phone.slice(-4)}`,
         real_name: `测试${phone.slice(-2)}`,
@@ -330,8 +330,8 @@ export async function createCustomerOrder(
 ): Promise<SeededOrder> {
   const client = createAnonClient()
   const customerPhone = overrides.phone ?? createUniquePhone()
-  const customerName = overrides.customerName ?? `娴嬭瘯椤惧${customerPhone.slice(-4)}`
-  const address = overrides.address ?? '涓婃捣甯傛郸涓滄柊鍖烘祴璇曡矾 88 鍙?'
+  const customerName = overrides.customerName ?? `测试顾客${customerPhone.slice(-4)}`
+  const address = overrides.address ?? '上海市浦东新区测试路 88 号'
   const scheduledTime = overrides.scheduledTime ?? new Date(Date.now() + 30 * 60 * 1000).toISOString()
   const status = overrides.status ?? 'pending'
 
@@ -350,7 +350,7 @@ export async function createCustomerOrder(
       .select('id')
       .single(),
     'customer insert',
-  )
+  ) as unknown as CustomerRow
 
   const order = await requireData(
     () => client
@@ -375,7 +375,7 @@ export async function createCustomerOrder(
       .select('id, merchant_id, customer_id, phone, customer_name, total_amount, status, confirmed_at')
       .single(),
     'order insert',
-  )
+  ) as unknown as OrderRow
 
   await requireData(
     () => client
@@ -510,7 +510,7 @@ export async function createCustomerForMerchant(params: {
       .select('id, phone, name, order_count, total_spent, points')
       .single(),
     'customer create for merchant',
-  ) as Promise<CustomerRow>
+  ) as unknown as Promise<CustomerRow>
 }
 
 export async function createMenuItemForMerchant(params: {
@@ -558,7 +558,7 @@ export async function createMenuItemForMerchant(params: {
       .select('id, name')
       .single(),
     'category insert',
-  ) as Promise<CategoryRow>
+  ) as unknown as CategoryRow
 
   const menuItem = await requireData(
     () => merchantClient
@@ -577,7 +577,7 @@ export async function createMenuItemForMerchant(params: {
       .select('id, category_id, name, price')
       .single(),
     'menu item insert',
-  ) as Promise<MenuItemRow>
+  ) as unknown as MenuItemRow
 
   return { category, menuItem }
 }
@@ -621,7 +621,7 @@ export async function createCategoryForMerchant(params: {
       .select('id, name')
       .single(),
     'category create for merchant',
-  ) as Promise<CategoryRow>
+  ) as unknown as CategoryRow
 
   return category
 }
@@ -827,7 +827,7 @@ export async function createUsedCouponForCustomer(merchantId: string, customerId
       .select('id, title, amount')
       .single(),
     'coupon insert',
-  )
+  ) as unknown as { id: string }
 
   const userCoupon = await requireData(
     () => client
@@ -1226,7 +1226,7 @@ export async function createUsedCouponForCustomerAsMerchant(params: {
       .select('id, title, amount')
       .single(),
     'coupon insert',
-  )
+  ) as unknown as { id: string }
 
   const publicClient = createAnonClient()
   const userCoupon = await requireData(
@@ -1334,7 +1334,7 @@ export async function getUserCouponsByCustomer(customerId: string) {
       .select('id, status, coupon_id, customer_id, used_at, coupon:coupons(id, title, amount)')
       .eq('customer_id', customerId),
     'user coupons by customer fetch',
-  ) as Promise<UserCouponRow[]>
+  ) as unknown as Promise<UserCouponRow[]>
 }
 
 export async function createCustomerMessage(params: {
