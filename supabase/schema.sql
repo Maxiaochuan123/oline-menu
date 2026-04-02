@@ -1,236 +1,94 @@
--- ============================================
--- 在线菜单点餐系统 - 数据库初始化 SQL
--- 在 Supabase SQL Editor 中运行此脚本
--- ============================================
+--
+-- PostgreSQL database dump
+--
 
--- 1. 商家表
-CREATE TABLE merchants (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT UNIQUE NOT NULL,
-  shop_name TEXT NOT NULL DEFAULT '我的小店',
-  is_accepting_orders BOOLEAN DEFAULT true,
-  announcement TEXT,
-  payment_qr_url TEXT,
-  payment_qr_urls JSONB,
-  business_hours JSONB DEFAULT '{"is_enabled": false, "open_time": "09:00", "close_time": "21:00"}',
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+-- Current canonical public schema snapshot exported from the development Supabase project.
+-- Use this file to initialize a fresh database schema.
 
--- 2. 菜品分类
-CREATE TABLE categories (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  sort_order INT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
 
--- 3. 菜品
-CREATE TABLE menu_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
-  name TEXT NOT NULL,
-  description TEXT,
-  price DECIMAL(10,2) NOT NULL,
-  unit TEXT NOT NULL DEFAULT '个',
-  image_url TEXT,
-  is_new BOOLEAN DEFAULT true,
-  is_available BOOLEAN DEFAULT true,
-  new_until TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+\restrict QaT2FleNH1mefvYa3hGzePSKFLv8OOpFVrhXhxl3gRcgRObYeeW3pmrQlSBP7S3
 
--- 4. 禁用日期
-CREATE TABLE disabled_dates (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  disabled_date DATE NOT NULL,
-  reason TEXT,
-  UNIQUE(merchant_id, disabled_date)
-);
+-- Dumped from database version 17.6
+-- Dumped by pg_dump version 17.9 (Debian 17.9-1.pgdg13+1)
 
--- 5. 客户
-CREATE TABLE customers (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  phone TEXT NOT NULL,
-  name TEXT NOT NULL,
-  address TEXT,
-  order_count INT DEFAULT 0,
-  total_spent DECIMAL(10,2) DEFAULT 0,
-  points INT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(merchant_id, phone)
-);
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
 
--- 6. 订单
-CREATE TABLE orders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
-  order_type TEXT NOT NULL CHECK (order_type IN ('personal', 'company')),
-  phone TEXT NOT NULL,
-  customer_name TEXT NOT NULL,
-  address TEXT NOT NULL,
-  scheduled_time TIMESTAMPTZ NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'preparing', 'delivering', 'completed', 'cancelled')),
-  cancelled_by TEXT CHECK (cancelled_by IN ('merchant', 'customer')),
-  cancelled_at TIMESTAMPTZ,
-  penalty_rate DECIMAL(5,4) DEFAULT 0,
-  penalty_amount DECIMAL(10,2) DEFAULT 0,
-  total_amount DECIMAL(10,2) NOT NULL,
-  refund_amount DECIMAL(10,2),
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+--
+-- Name: public; Type: SCHEMA; Schema: -; Owner: -
+--
 
--- 7. 订单明细
-CREATE TABLE order_items (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  menu_item_id UUID REFERENCES menu_items(id) ON DELETE SET NULL,
-  item_name TEXT NOT NULL,
-  item_price DECIMAL(10,2) NOT NULL,
-  quantity INT NOT NULL DEFAULT 1,
-  remark TEXT
-);
+CREATE SCHEMA public;
 
--- ============================================
--- 索引
--- ============================================
-CREATE INDEX idx_categories_merchant ON categories(merchant_id);
-CREATE INDEX idx_menu_items_merchant ON menu_items(merchant_id);
-CREATE INDEX idx_menu_items_category ON menu_items(category_id);
-CREATE INDEX idx_customers_merchant ON customers(merchant_id);
-CREATE INDEX idx_orders_merchant ON orders(merchant_id);
-CREATE INDEX idx_orders_status ON orders(status);
-CREATE INDEX idx_orders_scheduled ON orders(scheduled_time);
-CREATE INDEX idx_order_items_order ON order_items(order_id);
 
--- ============================================
--- RLS (Row Level Security) 策略
--- ============================================
-ALTER TABLE merchants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE menu_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE disabled_dates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
+--
+-- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: -
+--
 
--- 商家：登录用户可管理自己的数据
-CREATE POLICY "merchants_own" ON merchants
-  FOR ALL USING (auth.uid() = user_id);
+COMMENT ON SCHEMA public IS 'standard public schema';
 
--- 分类：商家管理自己的分类，客户可读
-CREATE POLICY "categories_merchant_all" ON categories
-  FOR ALL USING (merchant_id IN (SELECT id FROM merchants WHERE user_id = auth.uid()));
-CREATE POLICY "categories_public_read" ON categories
-  FOR SELECT USING (true);
 
--- 菜品：商家管理，客户可读
-CREATE POLICY "menu_items_merchant_all" ON menu_items
-  FOR ALL USING (merchant_id IN (SELECT id FROM merchants WHERE user_id = auth.uid()));
-CREATE POLICY "menu_items_public_read" ON menu_items
-  FOR SELECT USING (true);
+--
+-- Name: claim_coupon(uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
 
--- 禁用日期：商家管理，客户可读
-CREATE POLICY "disabled_dates_merchant_all" ON disabled_dates
-  FOR ALL USING (merchant_id IN (SELECT id FROM merchants WHERE user_id = auth.uid()));
-CREATE POLICY "disabled_dates_public_read" ON disabled_dates
-  FOR SELECT USING (true);
+CREATE FUNCTION public.claim_coupon(p_coupon_id uuid, p_customer_id uuid, p_expires_at timestamp with time zone) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+  v_quantity int;
+  v_claimed int;
+  v_status text;
+  v_inserted_coupon_id uuid;
+BEGIN
+  SELECT total_quantity, claimed_count, status
+  INTO v_quantity, v_claimed, v_status
+  FROM coupons
+  WHERE id = p_coupon_id
+  FOR UPDATE;
 
--- 客户：商家可管理，客户端可创建和查询
-CREATE POLICY "customers_merchant_all" ON customers
-  FOR ALL USING (merchant_id IN (SELECT id FROM merchants WHERE user_id = auth.uid()));
-CREATE POLICY "customers_public_read" ON customers
-  FOR SELECT USING (true);
-CREATE POLICY "customers_public_insert" ON customers
-  FOR INSERT WITH CHECK (true);
-CREATE POLICY "customers_public_update" ON customers
-  FOR UPDATE USING (true);
+  IF NOT FOUND OR v_status != 'active' THEN
+    RETURN false;
+  END IF;
 
--- 订单：商家可管理，匿名用户可创建和查询
-CREATE POLICY "orders_merchant_all" ON orders
-  FOR ALL USING (merchant_id IN (SELECT id FROM merchants WHERE user_id = auth.uid()));
-CREATE POLICY "orders_public_select" ON orders
-  FOR SELECT USING (true);
-CREATE POLICY "orders_public_insert" ON orders
-  FOR INSERT WITH CHECK (true);
-CREATE POLICY "orders_public_update" ON orders
-  FOR UPDATE USING (true);
+  IF v_quantity IS NOT NULL AND v_claimed >= v_quantity THEN
+    RETURN false;
+  END IF;
 
--- 订单明细：跟随订单权限
-CREATE POLICY "order_items_merchant_all" ON order_items
-  FOR ALL USING (order_id IN (SELECT id FROM orders WHERE merchant_id IN (SELECT id FROM merchants WHERE user_id = auth.uid())));
-CREATE POLICY "order_items_public_select" ON order_items
-  FOR SELECT USING (true);
-CREATE POLICY "order_items_public_insert" ON order_items
-  FOR INSERT WITH CHECK (true);
+  INSERT INTO user_coupons (customer_id, coupon_id, status, expires_at)
+  VALUES (p_customer_id, p_coupon_id, 'unused', p_expires_at)
+  ON CONFLICT (customer_id, coupon_id) DO NOTHING
+  RETURNING coupon_id INTO v_inserted_coupon_id;
 
--- ============================================
--- 商家表公开读取（客户端需要读取商家信息）
--- ============================================
-CREATE POLICY "merchants_public_read" ON merchants
-  FOR SELECT USING (true);
+  IF v_inserted_coupon_id IS NULL THEN
+    RETURN false;
+  END IF;
 
--- ============================================
--- 开启 Realtime 订阅
--- ============================================
-ALTER PUBLICATION supabase_realtime ADD TABLE orders;
+  UPDATE coupons
+  SET claimed_count = claimed_count + 1
+  WHERE id = p_coupon_id;
 
--- ============================================
--- Storage 策略（menu-images bucket）
--- 注意：请先在 Storage 控制台创建名为 menu-images 的 Public bucket
--- ============================================
-CREATE POLICY "authenticated users can upload"
-ON storage.objects FOR INSERT
-TO authenticated
-WITH CHECK (bucket_id = 'menu-images');
+  RETURN true;
+END;
+$$;
 
-CREATE POLICY "public can view images"
-ON storage.objects FOR SELECT
-TO public
-USING (bucket_id = 'menu-images');
 
-CREATE POLICY "authenticated users can delete"
-ON storage.objects FOR DELETE
-TO authenticated
-USING (bucket_id = 'menu-images');
+--
+-- Name: update_merchant_rating(); Type: FUNCTION; Schema: public; Owner: -
+--
 
--- ============================================
--- 客户评论与商家双向消息表
--- ============================================
-CREATE TABLE messages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-  sender TEXT NOT NULL CHECK (sender IN ('customer', 'merchant')),
-  content TEXT NOT NULL,
-  rating INT CHECK (rating BETWEEN 1 AND 5),
-  msg_type TEXT DEFAULT 'normal' CHECK (msg_type IN ('normal', 'after_sales', 'after_sales_closed')),
-  is_read_by_merchant BOOLEAN DEFAULT false,
-  is_read_by_customer BOOLEAN DEFAULT false,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- 若后续需兼容热更新请在 supabase sql 执行： 
--- ALTER TABLE messages ADD COLUMN IF NOT EXISTS msg_type TEXT DEFAULT 'normal' CHECK (msg_type IN ('normal', 'after_sales', 'after_sales_closed'));
-
-ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "messages_public_read"   ON messages FOR SELECT USING (true);
-CREATE POLICY "messages_public_insert" ON messages FOR INSERT WITH CHECK (true);
-CREATE POLICY "messages_public_update" ON messages FOR UPDATE USING (true);
-
--- 开启 Realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE messages;
-
--- ============================================
--- 触发器：计算并更新商户的总评分 (P12-E)
--- ============================================
-CREATE OR REPLACE FUNCTION update_merchant_rating()
-RETURNS TRIGGER AS $$
+CREATE FUNCTION public.update_merchant_rating() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
   IF NEW.rating IS NOT NULL THEN
     UPDATE merchants
@@ -243,10 +101,850 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
-CREATE TRIGGER on_message_rating_insert
-AFTER INSERT OR UPDATE OF rating ON messages
-FOR EACH ROW
-EXECUTE FUNCTION update_merchant_rating();
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: categories; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.categories (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    name text NOT NULL,
+    sort_order integer DEFAULT 0,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+--
+-- Name: coupons; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.coupons (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    title text NOT NULL,
+    amount numeric(10,2) NOT NULL,
+    min_spend numeric(10,2) DEFAULT 0,
+    is_newcomer_reward boolean DEFAULT false,
+    expiry_days integer DEFAULT 7,
+    status text DEFAULT 'active'::text,
+    created_at timestamp with time zone DEFAULT now(),
+    target_type text DEFAULT 'all'::text,
+    target_category_id uuid,
+    target_customer_ids uuid[] DEFAULT '{}'::uuid[],
+    target_item_ids text[] DEFAULT '{}'::text[],
+    stackable boolean DEFAULT false,
+    total_quantity integer,
+    claimed_count integer DEFAULT 0,
+    start_time timestamp with time zone DEFAULT now(),
+    CONSTRAINT coupons_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text]))),
+    CONSTRAINT coupons_target_type_check CHECK ((target_type = ANY (ARRAY['all'::text, 'category'::text, 'customer'::text])))
+);
+
+
+--
+-- Name: customers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customers (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    phone text NOT NULL,
+    name text,
+    address text,
+    order_count integer DEFAULT 0,
+    total_spent numeric(10,2) DEFAULT 0,
+    points integer DEFAULT 0,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+--
+-- Name: disabled_dates; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.disabled_dates (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    disabled_date date NOT NULL,
+    reason text
+);
+
+
+--
+-- Name: menu_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.menu_items (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    category_id uuid,
+    name text NOT NULL,
+    description text,
+    price numeric(10,2) NOT NULL,
+    image_url text,
+    is_new boolean DEFAULT true,
+    is_available boolean DEFAULT true,
+    new_until timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now(),
+    unit text DEFAULT '个'::text NOT NULL
+);
+
+
+--
+-- Name: merchants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.merchants (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid,
+    email text NOT NULL,
+    shop_name text DEFAULT '我的小店'::text NOT NULL,
+    is_accepting_orders boolean DEFAULT true,
+    announcement text,
+    payment_qr_url text,
+    created_at timestamp with time zone DEFAULT now(),
+    payment_qr_urls jsonb,
+    rating numeric(3,1) DEFAULT 5.0,
+    business_hours jsonb DEFAULT '{"open_time": "09:00", "close_time": "21:00", "is_enabled": false}'::jsonb,
+    real_name text,
+    id_card_num text,
+    membership_levels jsonb
+);
+
+
+--
+-- Name: COLUMN merchants.membership_levels; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.merchants.membership_levels IS '商家自定义会员等级配置。为空时使用系统默认方案。';
+
+
+--
+-- Name: messages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.messages (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    order_id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    sender text NOT NULL,
+    content text NOT NULL,
+    rating integer,
+    is_read_by_merchant boolean DEFAULT false,
+    is_read_by_customer boolean DEFAULT false,
+    created_at timestamp with time zone DEFAULT now(),
+    msg_type text DEFAULT 'normal'::text,
+    CONSTRAINT messages_msg_type_check CHECK ((msg_type = ANY (ARRAY['normal'::text, 'after_sales'::text, 'after_sales_closed'::text]))),
+    CONSTRAINT messages_rating_check CHECK (((rating >= 1) AND (rating <= 5))),
+    CONSTRAINT messages_sender_check CHECK ((sender = ANY (ARRAY['customer'::text, 'merchant'::text])))
+);
+
+
+--
+-- Name: order_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.order_items (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    order_id uuid NOT NULL,
+    menu_item_id uuid,
+    item_name text NOT NULL,
+    item_price numeric(10,2) NOT NULL,
+    quantity integer DEFAULT 1 NOT NULL,
+    remark text
+);
+
+
+--
+-- Name: orders; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.orders (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    merchant_id uuid NOT NULL,
+    customer_id uuid,
+    order_type text NOT NULL,
+    phone text NOT NULL,
+    customer_name text NOT NULL,
+    address text NOT NULL,
+    scheduled_time timestamp with time zone NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    cancelled_by text,
+    cancelled_at timestamp with time zone,
+    penalty_rate numeric(5,4) DEFAULT 0,
+    penalty_amount numeric(10,2) DEFAULT 0,
+    total_amount numeric(10,2) NOT NULL,
+    refund_amount numeric(10,2),
+    created_at timestamp with time zone DEFAULT now(),
+    original_amount numeric(10,2) DEFAULT 0,
+    vip_discount_rate numeric(4,2) DEFAULT 1.0,
+    vip_discount_amount numeric(10,2) DEFAULT 0,
+    coupon_discount_amount numeric(10,2) DEFAULT 0,
+    confirmed_at timestamp with time zone,
+    after_sales_status text DEFAULT 'none'::text,
+    after_sales_reason text,
+    after_sales_urge_count integer DEFAULT 0,
+    after_sales_last_urge_at timestamp with time zone,
+    after_sales_items jsonb,
+    after_sales_images jsonb,
+    coupon_ids uuid[] DEFAULT '{}'::uuid[],
+    is_coupon_refunded boolean DEFAULT false,
+    coupon_id uuid,
+    CONSTRAINT orders_after_sales_status_check CHECK ((after_sales_status = ANY (ARRAY['none'::text, 'pending'::text, 'resolved'::text, 'rejected'::text]))),
+    CONSTRAINT orders_cancelled_by_check CHECK ((cancelled_by = ANY (ARRAY['merchant'::text, 'customer'::text]))),
+    CONSTRAINT orders_order_type_check CHECK ((order_type = ANY (ARRAY['personal'::text, 'company'::text]))),
+    CONSTRAINT orders_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'preparing'::text, 'delivering'::text, 'completed'::text, 'cancelled'::text])))
+);
+
+
+--
+-- Name: user_coupons; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_coupons (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    customer_id uuid NOT NULL,
+    coupon_id uuid NOT NULL,
+    status text DEFAULT 'unused'::text,
+    used_at timestamp with time zone,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT user_coupons_status_check CHECK ((status = ANY (ARRAY['unused'::text, 'used'::text, 'expired'::text])))
+);
+
+
+--
+-- Name: categories categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: coupons coupons_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.coupons
+    ADD CONSTRAINT coupons_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customers customers_merchant_id_phone_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_merchant_id_phone_key UNIQUE (merchant_id, phone);
+
+
+--
+-- Name: customers customers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: disabled_dates disabled_dates_merchant_id_disabled_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.disabled_dates
+    ADD CONSTRAINT disabled_dates_merchant_id_disabled_date_key UNIQUE (merchant_id, disabled_date);
+
+
+--
+-- Name: disabled_dates disabled_dates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.disabled_dates
+    ADD CONSTRAINT disabled_dates_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: menu_items menu_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu_items
+    ADD CONSTRAINT menu_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: merchants merchants_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.merchants
+    ADD CONSTRAINT merchants_email_key UNIQUE (email);
+
+
+--
+-- Name: merchants merchants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.merchants
+    ADD CONSTRAINT merchants_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: messages messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: order_items order_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_items
+    ADD CONSTRAINT order_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: orders orders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orders
+    ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_coupons user_coupons_customer_coupon_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_coupons
+    ADD CONSTRAINT user_coupons_customer_coupon_unique UNIQUE (customer_id, coupon_id);
+
+
+--
+-- Name: user_coupons user_coupons_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_coupons
+    ADD CONSTRAINT user_coupons_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_categories_merchant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_categories_merchant ON public.categories USING btree (merchant_id);
+
+
+--
+-- Name: idx_coupons_merchant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_coupons_merchant ON public.coupons USING btree (merchant_id);
+
+
+--
+-- Name: idx_coupons_target; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_coupons_target ON public.coupons USING btree (target_type);
+
+
+--
+-- Name: idx_customers_merchant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customers_merchant ON public.customers USING btree (merchant_id);
+
+
+--
+-- Name: idx_menu_items_category; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_menu_items_category ON public.menu_items USING btree (category_id);
+
+
+--
+-- Name: idx_menu_items_merchant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_menu_items_merchant ON public.menu_items USING btree (merchant_id);
+
+
+--
+-- Name: idx_order_items_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_order_items_order ON public.order_items USING btree (order_id);
+
+
+--
+-- Name: idx_orders_coupon_ids; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_coupon_ids ON public.orders USING gin (coupon_ids);
+
+
+--
+-- Name: idx_orders_merchant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_merchant ON public.orders USING btree (merchant_id);
+
+
+--
+-- Name: idx_orders_scheduled; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_scheduled ON public.orders USING btree (scheduled_time);
+
+
+--
+-- Name: idx_orders_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_status ON public.orders USING btree (status);
+
+
+--
+-- Name: idx_user_coupons_customer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_user_coupons_customer ON public.user_coupons USING btree (customer_id);
+
+
+--
+-- Name: idx_user_coupons_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_user_coupons_status ON public.user_coupons USING btree (status);
+
+
+--
+-- Name: messages on_message_rating_insert; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER on_message_rating_insert AFTER INSERT OR UPDATE OF rating ON public.messages FOR EACH ROW EXECUTE FUNCTION public.update_merchant_rating();
+
+
+--
+-- Name: categories categories_merchant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT categories_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES public.merchants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: coupons coupons_merchant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.coupons
+    ADD CONSTRAINT coupons_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES public.merchants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: coupons coupons_target_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.coupons
+    ADD CONSTRAINT coupons_target_category_id_fkey FOREIGN KEY (target_category_id) REFERENCES public.categories(id) ON DELETE SET NULL;
+
+
+--
+-- Name: customers customers_merchant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES public.merchants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: disabled_dates disabled_dates_merchant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.disabled_dates
+    ADD CONSTRAINT disabled_dates_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES public.merchants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: orders fk_orders_coupon; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orders
+    ADD CONSTRAINT fk_orders_coupon FOREIGN KEY (coupon_id) REFERENCES public.coupons(id) ON DELETE SET NULL;
+
+
+--
+-- Name: menu_items menu_items_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu_items
+    ADD CONSTRAINT menu_items_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id) ON DELETE SET NULL;
+
+
+--
+-- Name: menu_items menu_items_merchant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu_items
+    ADD CONSTRAINT menu_items_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES public.merchants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: merchants merchants_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.merchants
+    ADD CONSTRAINT merchants_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: messages messages_merchant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES public.merchants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: messages messages_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: order_items order_items_menu_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_items
+    ADD CONSTRAINT order_items_menu_item_id_fkey FOREIGN KEY (menu_item_id) REFERENCES public.menu_items(id) ON DELETE SET NULL;
+
+
+--
+-- Name: order_items order_items_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_items
+    ADD CONSTRAINT order_items_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: orders orders_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orders
+    ADD CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE SET NULL;
+
+
+--
+-- Name: orders orders_merchant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orders
+    ADD CONSTRAINT orders_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES public.merchants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_coupons user_coupons_coupon_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_coupons
+    ADD CONSTRAINT user_coupons_coupon_id_fkey FOREIGN KEY (coupon_id) REFERENCES public.coupons(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_coupons user_coupons_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_coupons
+    ADD CONSTRAINT user_coupons_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+
+--
+-- Name: categories; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: categories categories_merchant_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY categories_merchant_all ON public.categories USING ((merchant_id IN ( SELECT merchants.id
+   FROM public.merchants
+  WHERE (merchants.user_id = auth.uid()))));
+
+
+--
+-- Name: categories categories_public_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY categories_public_read ON public.categories FOR SELECT USING (true);
+
+
+--
+-- Name: coupons; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.coupons ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: coupons coupons_merchant_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY coupons_merchant_all ON public.coupons USING ((merchant_id IN ( SELECT merchants.id
+   FROM public.merchants
+  WHERE (merchants.user_id = auth.uid()))));
+
+
+--
+-- Name: coupons coupons_public_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY coupons_public_read ON public.coupons FOR SELECT USING ((status = 'active'::text));
+
+
+--
+-- Name: customers; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: customers customers_merchant_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customers_merchant_all ON public.customers USING ((merchant_id IN ( SELECT merchants.id
+   FROM public.merchants
+  WHERE (merchants.user_id = auth.uid()))));
+
+
+--
+-- Name: customers customers_public_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customers_public_insert ON public.customers FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: customers customers_public_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customers_public_read ON public.customers FOR SELECT USING (true);
+
+
+--
+-- Name: customers customers_public_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY customers_public_update ON public.customers FOR UPDATE USING (true);
+
+
+--
+-- Name: disabled_dates; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.disabled_dates ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: disabled_dates disabled_dates_merchant_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY disabled_dates_merchant_all ON public.disabled_dates USING ((merchant_id IN ( SELECT merchants.id
+   FROM public.merchants
+  WHERE (merchants.user_id = auth.uid()))));
+
+
+--
+-- Name: disabled_dates disabled_dates_public_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY disabled_dates_public_read ON public.disabled_dates FOR SELECT USING (true);
+
+
+--
+-- Name: menu_items; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.menu_items ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: menu_items menu_items_merchant_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY menu_items_merchant_all ON public.menu_items USING ((merchant_id IN ( SELECT merchants.id
+   FROM public.merchants
+  WHERE (merchants.user_id = auth.uid()))));
+
+
+--
+-- Name: menu_items menu_items_public_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY menu_items_public_read ON public.menu_items FOR SELECT USING (true);
+
+
+--
+-- Name: merchants; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.merchants ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: merchants merchants_own; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY merchants_own ON public.merchants USING ((auth.uid() = user_id));
+
+
+--
+-- Name: merchants merchants_public_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY merchants_public_read ON public.merchants FOR SELECT USING (true);
+
+
+--
+-- Name: messages; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: messages messages_public_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY messages_public_insert ON public.messages FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: messages messages_public_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY messages_public_read ON public.messages FOR SELECT USING (true);
+
+
+--
+-- Name: messages messages_public_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY messages_public_update ON public.messages FOR UPDATE USING (true);
+
+
+--
+-- Name: order_items; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: order_items order_items_merchant_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY order_items_merchant_all ON public.order_items USING ((order_id IN ( SELECT orders.id
+   FROM public.orders
+  WHERE (orders.merchant_id IN ( SELECT merchants.id
+           FROM public.merchants
+          WHERE (merchants.user_id = auth.uid()))))));
+
+
+--
+-- Name: order_items order_items_public_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY order_items_public_insert ON public.order_items FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: order_items order_items_public_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY order_items_public_select ON public.order_items FOR SELECT USING (true);
+
+
+--
+-- Name: orders; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: orders orders_merchant_all; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY orders_merchant_all ON public.orders USING ((merchant_id IN ( SELECT merchants.id
+   FROM public.merchants
+  WHERE (merchants.user_id = auth.uid()))));
+
+
+--
+-- Name: orders orders_public_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY orders_public_insert ON public.orders FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: orders orders_public_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY orders_public_select ON public.orders FOR SELECT USING (true);
+
+
+--
+-- Name: orders orders_public_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY orders_public_update ON public.orders FOR UPDATE USING (true);
+
+
+--
+-- Name: user_coupons; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.user_coupons ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: user_coupons user_coupons_merchant_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_coupons_merchant_read ON public.user_coupons FOR SELECT USING ((coupon_id IN ( SELECT coupons.id
+   FROM public.coupons
+  WHERE (coupons.merchant_id IN ( SELECT merchants.id
+           FROM public.merchants
+          WHERE (merchants.user_id = auth.uid()))))));
+
+
+--
+-- Name: user_coupons user_coupons_public_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_coupons_public_insert ON public.user_coupons FOR INSERT WITH CHECK (true);
+
+
+--
+-- Name: user_coupons user_coupons_public_read; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_coupons_public_read ON public.user_coupons FOR SELECT USING (true);
+
+
+--
+-- Name: user_coupons user_coupons_public_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_coupons_public_update ON public.user_coupons FOR UPDATE USING (true);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict QaT2FleNH1mefvYa3hGzePSKFLv8OOpFVrhXhxl3gRcgRObYeeW3pmrQlSBP7S3
 
